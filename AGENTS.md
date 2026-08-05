@@ -62,6 +62,22 @@ Implementações futuras.txt                    # roadmap funcional
 
 Use sempre os nomes canônicos sem sufixos numéricos.
 
+## Relação com o projeto real
+
+Com exceção de `AGENTS.md`, `Implementações futuras.txt`, `.gitignore` e das pastas auxiliares iniciadas por letra maiúscula, o conteúdo deste repositório deve ser tratado como uma réplica da estrutura atual do projeto real no Home Assistant e no ESPHome.
+
+Regras para alterações e transferência:
+
+- Trate os arquivos e pastas da réplica como se fossem o projeto real durante análises, correções e validações.
+- Quando uma correção exigir mudança em `packages/`, `custom_components/`, `esphome/`, `www/` ou nos arquivos de configuração, deixe somente os arquivos necessários prontos para o usuário copiar e substituir na instalação real.
+- Faça sempre a menor alteração necessária e preserve o restante da estrutura e do comportamento existentes.
+- Não crie cópias, versões numeradas, arquivos paralelos nem múltiplas instâncias para uma mesma implementação. O histórico e o rollback são responsabilidade do Git.
+- O usuário fará manualmente a transferência para o projeto real, a instalação e os testes no Home Assistant ou no ESPHome.
+- Não presuma que uma alteração feita nesta réplica já está instalada ou validada no ambiente físico.
+- Pastas iniciadas por letra maiúscula são auxiliares deste repositório e não existem como pastas no projeto real.
+- `Dashboards/` reúne arquivos YAML que o usuário copia e cola na interface do Home Assistant; esses arquivos não são carregados diretamente de uma pasta da instalação real.
+- `Images/` contém imagens usadas como contexto visual e apoio para prompts e análises de erros; não faz parte do conteúdo a ser instalado.
+
 ## Contrato entre os componentes
 
 Fluxo esperado:
