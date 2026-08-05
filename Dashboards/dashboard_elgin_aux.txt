@@ -1,0 +1,276 @@
+views:
+  - type: sections
+    sections:
+      - type: grid
+        column_span: 4
+        cards:
+          - type: heading
+            heading: Elgin AUX — controle local
+            heading_style: title
+            icon: mdi:air-conditioner
+            badges:
+              - type: entity
+                entity: binary_sensor.esp8266_elgin_aux_estado_base_valido
+                name: Base IR
+                show_icon: true
+                show_state: true
+                color: state
+              - type: entity
+                entity: binary_sensor.elgin_aux_configuracao_avancada_aplicada
+                name: Avançado
+                show_icon: true
+                show_state: true
+                color: state
+              - type: entity
+                entity: sensor.elgin_aux_fonte_da_temperatura
+                name: Fonte
+                show_icon: true
+                show_state: true
+            grid_options:
+              columns: 48
+              rows: auto
+          - type: tile
+            entity: climate.esp8266_elgin_aux_quarto
+            name: Ar-condicionado do quarto
+            icon: mdi:air-conditioner
+            color: blue
+            features_position: bottom
+            features:
+              - type: target-temperature
+              - type: climate-hvac-modes
+                style: icons
+                hvac_modes:
+                  - "off"
+                  - auto
+                  - cool
+                  - heat
+                  - dry
+                  - fan_only
+              - type: climate-fan-modes
+                style: icons
+                fan_modes:
+                  - auto
+                  - low
+                  - medium
+                  - high
+              - type: climate-swing-modes
+                style: dropdown
+                swing_modes:
+                  - "off"
+                  - vertical
+                  - horizontal
+                  - both
+            grid_options:
+              columns: 48
+              rows: 5
+          - type: heading
+            heading: Funções avançadas
+            heading_style: subtitle
+            icon: mdi:tune-variant
+            badges:
+              - type: entity
+                entity: input_boolean.elgin_aux_alteracoes_avancadas_pendentes
+                name: Pendentes
+                show_icon: true
+                show_state: true
+                color: state
+            grid_options:
+              columns: 48
+              rows: auto
+          - type: tile
+            entity: input_boolean.elgin_aux_ifeel
+            name: Conforto / I Feel
+            icon: mdi:thermometer-auto
+            color: amber
+            features_position: inline
+            features:
+              - type: toggle
+            grid_options:
+              columns: 12
+              rows: 2
+          - type: tile
+            entity: input_boolean.elgin_aux_health
+            name: Health / IonAir
+            icon: mdi:air-filter
+            color: green
+            features_position: inline
+            features:
+              - type: toggle
+            grid_options:
+              columns: 12
+              rows: 2
+          - type: tile
+            entity: input_boolean.elgin_aux_turbo
+            name: Turbo
+            icon: mdi:weather-windy
+            color: red
+            features_position: inline
+            features:
+              - type: toggle
+            grid_options:
+              columns: 12
+              rows: 2
+          - type: tile
+            entity: input_boolean.elgin_aux_sleep
+            name: Dormir
+            icon: mdi:sleep
+            color: indigo
+            features_position: inline
+            features:
+              - type: toggle
+            grid_options:
+              columns: 12
+              rows: 2
+          - type: button
+            name: Aplicar funções avançadas
+            icon: mdi:remote
+            color: blue
+            show_state: false
+            tap_action:
+              action: perform-action
+              perform_action: script.turn_on
+              target:
+                entity_id: script.elgin_aux_enviar_estado_completo
+            hold_action:
+              action: more-info
+              entity: script.elgin_aux_enviar_estado_completo
+            grid_options:
+              columns: 48
+              rows: 2
+          - type: heading
+            heading: Comandos especiais
+            heading_style: subtitle
+            icon: mdi:gesture-tap-button
+            grid_options:
+              columns: 48
+              rows: auto
+          - type: button
+            name: Alternar visor
+            icon: mdi:television-ambient-light
+            color: amber
+            show_state: false
+            tap_action:
+              action: perform-action
+              perform_action: script.turn_on
+              target:
+                entity_id: script.elgin_aux_alternar_visor
+            hold_action:
+              action: more-info
+              entity: script.elgin_aux_alternar_visor
+            grid_options:
+              columns: 24
+              rows: 2
+          - type: button
+            name: Iniciar Clean
+            icon: mdi:air-filter
+            color: green
+            show_state: false
+            tap_action:
+              action: perform-action
+              perform_action: script.turn_on
+              target:
+                entity_id: script.elgin_aux_iniciar_clean
+            hold_action:
+              action: more-info
+              entity: script.elgin_aux_iniciar_clean
+            grid_options:
+              columns: 24
+              rows: 2
+          - type: heading
+            heading: Temperatura remota e repetição
+            heading_style: subtitle
+            icon: mdi:thermometer-sync
+            grid_options:
+              columns: 48
+              rows: auto
+          - type: tile
+            entity: input_select.elgin_aux_fonte_temperatura
+            name: Fonte da temperatura do I Feel
+            icon: mdi:source-branch
+            color: green
+            features_position: bottom
+            features:
+              - type: select-options
+            grid_options:
+              columns: 16
+              rows: 2
+          - type: tile
+            entity: sensor.sensor_temperatura_sensor_dedicado
+            name: Temperatura Sensor Dedicado
+            icon: mdi:home-thermometer
+            color: green
+            grid_options:
+              columns: 16
+              rows: 2
+          - type: tile
+            entity: input_number.elgin_aux_current_temperature
+            name: Temperatura manual
+            icon: mdi:thermometer
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: buttons
+            grid_options:
+              columns: 16
+              rows: 2
+          - type: tile
+            entity: sensor.elgin_aux_temperatura_efetiva_de_envio
+            name: Temperatura efetiva
+            icon: mdi:thermometer-check
+            color: blue
+            grid_options:
+              columns: 16
+              rows: 2
+          - type: tile
+            entity: input_number.elgin_aux_intervalo_atualizacao_silenciosa
+            name: Intervalo automático
+            icon: mdi:timer-sync
+            features_position: bottom
+            features:
+              - type: numeric-input
+                style: buttons
+            grid_options:
+              columns: 16
+              rows: 2
+          - type: tile
+            entity: sensor.elgin_aux_minutos_para_proxima_atualizacao
+            name: Próxima automática em
+            icon: mdi:timer-sand
+            color: amber
+            grid_options:
+              columns: 16
+              rows: 2
+          - type: button
+            entity: binary_sensor.elgin_aux_atualizacao_silenciosa_disponivel
+            name: Enviar agora sem bip
+            icon: mdi:volume-off
+            color: state
+            show_state: true
+            tap_action:
+              action: perform-action
+              perform_action: script.turn_on
+              target:
+                entity_id: script.elgin_aux_atualizar_temperatura_silenciosa
+            hold_action:
+              action: more-info
+              entity: binary_sensor.elgin_aux_atualizacao_silenciosa_disponivel
+            grid_options:
+              columns: 24
+              rows: 2
+          - type: tile
+            entity: input_datetime.elgin_aux_ultima_atualizacao_temperatura
+            name: Último envio de temperatura
+            icon: mdi:clock-check
+            grid_options:
+              columns: 24
+              rows: 2
+    header:
+      card:
+        type: markdown
+        text_only: true
+        content: >-
+          # Olá {{ user }}
+
+          Aqui é a central de automações e scripts do sistema, ativações e
+          desativações são de fácil acesso por aqui.
+    footer: {}
