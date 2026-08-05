@@ -1,0 +1,197 @@
+# Board: NodeMCU v2 (ESP8266) (NodeMCU)
+# Definition: definitions/boards/nodemcuv2/manifest.yaml
+
+esphome:
+  name: esp8266
+  friendly_name: ESP8266
+
+esp8266:
+  board: nodemcuv2
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+  actions:
+    - action: elgin_send_state
+      supports_response: status
+      variables:
+        power: bool
+        mode: string
+        fan: string
+        target_temperature: int
+        current_temperature: int
+        ifeel: bool
+        swing_vertical: bool
+        swing_horizontal: bool
+        turbo: bool
+        sleep_enabled: bool
+        health: bool
+        command: string
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(elgin_aux_protocol).send_state_from_api(
+                  power,
+                  mode,
+                  fan,
+                  target_temperature,
+                  current_temperature,
+                  ifeel,
+                  swing_vertical,
+                  swing_horizontal,
+                  turbo,
+                  sleep_enabled,
+                  health,
+                  command
+                );
+            then:
+              - api.respond:
+                  success: true
+            else:
+              - api.respond:
+                  success: false
+                  error_message: !lambda |-
+                    return id(elgin_aux_protocol).get_last_error();
+    - action: elgin_import_observed_state
+      supports_response: status
+      variables:
+        power: bool
+        mode: string
+        fan: string
+        target_temperature: int
+        current_temperature: int
+        swing_vertical: bool
+        swing_horizontal: bool
+        sleep_enabled: bool
+        health: bool
+        advanced_values_authoritative: bool
+        ifeel: bool
+        turbo: bool
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(elgin_aux_protocol).import_observed_state_from_api(
+                  power,
+                  mode,
+                  fan,
+                  target_temperature,
+                  current_temperature,
+                  swing_vertical,
+                  swing_horizontal,
+                  sleep_enabled,
+                  health,
+                  advanced_values_authoritative,
+                  ifeel,
+                  turbo
+                );
+            then:
+              - api.respond:
+                  success: true
+            else:
+              - api.respond:
+                  success: false
+                  error_message: !lambda |-
+                    return id(elgin_aux_protocol).get_last_error();
+
+    - action: elgin_update_sensor_temperature
+      supports_response: status
+      variables:
+        current_temperature: int
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(elgin_aux_protocol).send_sensor_temperature_update_from_api(
+                  current_temperature
+                );
+            then:
+              - api.respond:
+                  success: true
+            else:
+              - api.respond:
+                  success: false
+                  error_message: !lambda |-
+                    return id(elgin_aux_protocol).get_last_error();
+    - action: elgin_toggle_display
+      supports_response: status
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(elgin_aux_protocol).send_display_toggle_from_api();
+            then:
+              - api.respond:
+                  success: true
+            else:
+              - api.respond:
+                  success: false
+                  error_message: !lambda |-
+                    return id(elgin_aux_protocol).get_last_error();
+
+    - action: elgin_start_clean
+      supports_response: status
+      then:
+        - if:
+            condition:
+              lambda: |-
+                return id(elgin_aux_protocol).send_clean_from_api();
+            then:
+              - api.respond:
+                  success: true
+            else:
+              - api.respond:
+                  success: false
+                  error_message: !lambda |-
+                    return id(elgin_aux_protocol).get_last_error();
+
+ota:
+  - platform: esphome
+
+wifi:
+  power_save_mode: NONE
+  reboot_timeout: 10min
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: ESP8266 Fallback Hotspot
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+remote_receiver:
+  id: receptor_ir
+  pin:
+    number: D2
+    inverted: true
+  dump: raw
+  tolerance: 25%
+  filter: 50us
+  idle: 15ms
+  buffer_size: 4kb
+
+remote_transmitter:
+  id: emissor_ir
+  pin: D1
+  carrier_duty_percent: 50%
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components:
+      - elgin_aux
+
+elgin_aux:
+  id: elgin_aux_protocol
+  name: "Elgin AUX Quarto"
+  icon: mdi:air-conditioner
+  transmitter_id: emissor_ir
+  run_self_test: true
+  state_valid:
+    name: "Elgin AUX Estado-base válido"
+    icon: mdi:database-check
+    entity_category: diagnostic
