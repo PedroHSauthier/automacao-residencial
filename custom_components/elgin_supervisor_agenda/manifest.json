@@ -1,0 +1,15 @@
+{
+  "domain": "elgin_supervisor_agenda",
+  "name": "Elgin Supervisor Agenda",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://developers.home-assistant.io/docs/core/entity/calendar/",
+  "integration_type": "helper",
+  "iot_class": "local_push",
+  "version": "1.1.0",
+  "dependencies": [
+    "websocket_api",
+    "lovelace",
+    "http"
+  ]
+}

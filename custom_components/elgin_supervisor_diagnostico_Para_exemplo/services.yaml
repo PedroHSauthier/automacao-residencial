@@ -1,0 +1,129 @@
+begin_trace:
+  name: Iniciar correlação
+  description: Cria o correlation_id raiz de um fluxo lógico e retorna os dados da correlação.
+  fields:
+    actor:
+      name: Ator
+      description: Nome humano do componente executor.
+      example: Elgin Supervisor
+      selector:
+        text:
+    source_entity_id:
+      name: Entidade de origem
+      selector:
+        entity:
+    category:
+      name: Categoria
+      default: evaluation
+      selector:
+        text:
+    summary:
+      name: Resumo
+      default: Fluxo de auditoria iniciado
+      selector:
+        text:
+
+log_event:
+  name: Registrar evento
+  description: Registra um evento estruturado sem bloquear o fluxo climático.
+  fields:
+    correlation_id:
+      name: Correlation ID
+      selector:
+        text:
+    category:
+      name: Categoria
+      required: true
+      selector:
+        text:
+    event_type:
+      name: Tipo do evento
+      required: true
+      selector:
+        text:
+    severity:
+      name: Severidade
+      default: info
+      selector:
+        select:
+          options: [debug, info, success, warning, error, critical]
+    summary:
+      name: Resumo humano
+      required: true
+      selector:
+        text:
+          multiline: true
+    outcome:
+      name: Resultado
+      default: unknown
+      selector:
+        select:
+          options: [started, calculated, unchanged, requested, accepted, transmitted_by_software, confirmed, suppressed, blocked, rejected, failed, external, unknown]
+    retention_class:
+      name: Retenção
+      default: full
+      selector:
+        select:
+          options: [absolute, error, full]
+    source:
+      name: Origem
+      selector:
+        text:
+    transmission_id:
+      name: Transmission ID
+      selector:
+        text:
+    frame_kind:
+      name: Tipo de frame
+      selector:
+        text:
+    frame_hash:
+      name: Hash do frame
+      selector:
+        text:
+    expected_audibility:
+      name: Audibilidade esperada
+      default: unknown
+      selector:
+        select:
+          options: [audible_expected, silent_expected, no_transmission, unknown]
+    details:
+      name: Detalhes
+      selector:
+        object:
+    before:
+      name: Antes
+      selector:
+        object:
+    desired:
+      name: Desejado
+      selector:
+        object:
+    confirmed:
+      name: Confirmado
+      selector:
+        object:
+
+register_beep:
+  name: Registrar bip
+  description: Registra uma observação manual e abre a janela de correlação configurada.
+  fields:
+    quantity:
+      name: Quantidade
+      required: true
+      selector:
+        select:
+          options: [1 bip, 2 bips, vários bips, não tenho certeza]
+    note:
+      name: Observação
+      selector:
+        text:
+          multiline: true
+    occurred_at:
+      name: Horário
+      selector:
+        datetime:
+
+run_cleanup:
+  name: Executar limpeza
+  description: Aplica imediatamente as políticas das três classes de retenção.

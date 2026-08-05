@@ -1,0 +1,172 @@
+create_rule:
+  name: Criar regra
+  description: Cria uma regra composta de agenda.
+  fields:
+    rule:
+      name: Regra
+      description: Objeto completo da regra.
+      required: true
+      selector:
+        object:
+update_rule:
+  name: Atualizar regra
+  description: Atualiza uma regra pelo identificador contido no objeto.
+  fields:
+    rule:
+      name: Regra
+      required: true
+      selector:
+        object:
+delete_rule:
+  name: Excluir regra
+  fields:
+    rule_id:
+      name: Identificador
+      required: true
+      selector:
+        text:
+set_rule_enabled:
+  name: Habilitar ou desabilitar regra
+  fields:
+    rule_id:
+      name: Identificador
+      required: true
+      selector:
+        text:
+    enabled:
+      name: Habilitada
+      required: true
+      selector:
+        boolean:
+evaluate:
+  name: Reavaliar agenda
+  description: Recalcula imediatamente todas as ocorrências e efeitos.
+clear_rules:
+  name: Excluir todas as regras
+  description: Exclui permanentemente todas as regras cadastradas.
+cancel_active_once_rules:
+  name: Cancelar exceções únicas ativas
+  description: Desabilita regras únicas que estejam ativas neste momento.
+
+save_preset:
+  name: Salvar preset de condição
+  description: Cria ou atualiza um preset independente de aquecimento, refrigeração ou desumidificação.
+  fields:
+    preset:
+      name: Preset
+      description: Objeto completo do preset. O identificador e o modo são imutáveis após a criação.
+      required: true
+      selector:
+        object:
+delete_preset:
+  name: Excluir preset de condição
+  description: Exclui um preset não protegido e remove referências da Agenda.
+  fields:
+    preset_id:
+      name: Identificador imutável
+      required: true
+      selector:
+        text:
+set_base_preset:
+  name: Definir preset base por modo
+  description: Define o preset base persistente de um único modo climático.
+  fields:
+    mode:
+      name: Modo
+      required: true
+      selector:
+        select:
+          options:
+            - label: Aquecimento
+              value: heat
+            - label: Refrigeração
+              value: cool
+            - label: Desumidificação
+              value: dry
+    preset_id:
+      name: Identificador do preset
+      required: true
+      selector:
+        text:
+
+save_power_profile:
+  name: Salvar perfil de potência
+  description: Cria ou atualiza um perfil de potência persistente de um único modo.
+  fields:
+    profile:
+      name: Perfil
+      required: true
+      selector:
+        object:
+delete_power_profile:
+  name: Excluir perfil de potência
+  description: Exclui um perfil não protegido. A potência base não pode ser excluída.
+  fields:
+    profile_id:
+      name: Identificador imutável
+      required: true
+      selector:
+        text:
+set_base_power_profile:
+  name: Definir potência base e fallback
+  description: Define o perfil base persistente de um modo; ele também é o fallback manual.
+  fields:
+    mode:
+      name: Modo
+      required: true
+      selector:
+        select:
+          options:
+            - label: Aquecimento
+              value: heat
+            - label: Refrigeração
+              value: cool
+            - label: Desumidificação
+              value: dry
+    profile_id:
+      name: Identificador do perfil
+      required: true
+      selector:
+        text:
+save_power_rule:
+  name: Salvar regra automática de potência
+  description: Cria ou atualiza uma regra persistente de histerese que pode contribuir para vários modos.
+  fields:
+    rule:
+      name: Regra
+      required: true
+      selector:
+        object:
+delete_power_rule:
+  name: Excluir regra automática de potência
+  fields:
+    rule_id:
+      name: Identificador
+      required: true
+      selector:
+        text:
+set_power_rule_enabled:
+  name: Habilitar regra automática de potência
+  fields:
+    rule_id:
+      name: Identificador
+      required: true
+      selector:
+        text:
+    enabled:
+      name: Habilitada
+      required: true
+      selector:
+        boolean:
+update_power_settings:
+  name: Atualizar limites e prioridades
+  description: Atualiza limites locais dos ciclos, prioridades dos modos e bônus de continuidade.
+  fields:
+    settings:
+      name: Configurações
+      required: true
+      selector:
+        object:
+restore_default_power_profiles:
+  name: Restaurar perfis de potência padrões
+  description: Restaura somente os perfis protegidos, preservando personalizados. Exige Supervisor desativado e modo sombra ativo.

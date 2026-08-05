@@ -1,0 +1,54 @@
+{
+  "title": "Elgin Supervisor — Auditoria e Diagnóstico",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Criar auditoria do Supervisor",
+        "description": "Cria uma única instância local com SQLite próprio, correlação e card de logs. A integração não controla o ar-condicionado."
+      }
+    },
+    "abort": {
+      "already_configured": "A auditoria do Supervisor já foi configurada."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configurações essenciais",
+        "description": "O card Auditoria e Logs oferece todas as opções. Esta tela mantém um editor nativo de contingência.",
+        "data": {
+          "intensive_mode": "Modo intensivo",
+          "retention_absolute_days": "Retenção Absoluto (dias)",
+          "retention_error_days": "Retenção Erros (dias)",
+          "retention_full_days": "Retenção Completo (dias)",
+          "beep_window_before_seconds": "Janela antes do bip (segundos)",
+          "beep_window_after_seconds": "Janela depois do bip (segundos)",
+          "notifications_enabled": "Notificações habilitadas",
+          "notification_min_severity": "Severidade mínima",
+          "notification_cooldown_seconds": "Cooldown (segundos)"
+        }
+      }
+    },
+    "error": {
+      "invalid_options": "Revise os limites informados."
+    }
+  },
+  "issues": {
+    "database_unavailable": {
+      "title": "Banco da auditoria indisponível",
+      "description": "O SQLite exclusivo da auditoria não pôde ser aberto. O controle climático continua independente."
+    },
+    "frontend_not_registered": {
+      "title": "Frontend da auditoria não registrado",
+      "description": "O arquivo do card foi servido, mas o recurso Lovelace não pôde ser registrado automaticamente."
+    },
+    "instrumentation_incomplete": {
+      "title": "Instrumentação do Elgin incompleta",
+      "description": "Uma ou mais entidades/ações ESPHome exigidas pela auditoria não foram encontradas."
+    },
+    "critical_fallback_used": {
+      "title": "Journal de emergência da auditoria foi utilizado",
+      "description": "Ao menos um evento crítico não pôde ser gravado imediatamente no SQLite e foi preservado no arquivo NDJSON de contingência. Verifique espaço em disco, permissões e o estado do escritor antes de remover o arquivo."
+    }
+  }
+}

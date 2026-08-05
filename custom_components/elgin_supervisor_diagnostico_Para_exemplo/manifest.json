@@ -1,0 +1,14 @@
+{
+  "domain": "elgin_supervisor_diagnostico",
+  "name": "Elgin Supervisor — Auditoria e Diagnóstico",
+  "version": "1.0.1",
+  "config_flow": true,
+  "documentation": "https://www.home-assistant.io/integrations/diagnostics/",
+  "issue_tracker": "https://github.com/home-assistant/core/issues",
+  "codeowners": [],
+  "dependencies": ["http", "lovelace", "websocket_api"],
+  "after_dependencies": ["esphome", "localtuya", "elgin_supervisor_agenda"],
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "requirements": []
+}

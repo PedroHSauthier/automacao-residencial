@@ -1,0 +1,13 @@
+Implementações futuras:
+
+Tabela de log, será criado uma nova janela com logs próprios para o supervisor, trará um resumo completo do que o supervisor fez e interpreto, o que acionou a decisão o que o supervisor fez a respeito, o que ele de fato enviou, quantas vezes ele enviou, se algum bloqueio impediu de subir o sinal, o que impediu, exatamente o que o sinal se for enviado enviou, e muito mais, tudo em um componente novo, extremamente detalhado, mas somente com o importante, deve ser feito para fácil interpretação de ser um ser humano, deve ser estilizado de maneira a ser facilmente interpretado, utilizando mais cores que somente preto e azul que será a base dele, seguindo o padrão dos outros cards como preset e potência, e agenda, os informações nesses logs devem seguir o melhor exemplo possível da indústria.
+
+Na tabela supervisor climático iremos adicionar um toggle, para que no fim do ciclo, seja usado o ar no modo ventilador, para este modo ventilador terá uma nova aba para configurar, por exemplo, para quais modos que no fim deles será ligado o ventilador, com qual força de vento ele irá ligar, quanto tempo ele ficará ligado, etc.
+
+O clima regional deve receber um tratamento comparável ao do preset, agenda e potência, ele terá sua própria aba, nessa aba, terá seu componente, neste pode se utilizar de subabas no card diretamente, onde poderemos tratar e configurar completamente o clima regional, o que ele afeta o quanto afeta, as condições e regras, ele deve afetar potencia e preset, e deve ser dinâmico em suas regras.
+
+Devemos remover do dashboard o que não for mais utilizado com as mudanças para card do clima regional e tabela de log. Tudo que for helper do clima regional deve ser retirado, o log é algo novo a parte.
+
+Na aba principal do dashboard iremos implementar um novo componente base para padronizar o estilo do supervisor, este será um destaque ainda sim, por que deve ser colorido para que seja a tela de mais fácil leitura, irá trazer os principais toggles das abas do supervisor, junto das informações mais importantes, com fontes de letra devidamente formatadas para algo profissional, com cores condizentes ao sistema, mas também a cada função, e neste novo componente as funções do restante dos helpers que utilizamos para fazer o supervisor funcionar iremos acoplar, assim fazendo todas as abas do supervisor como um card novo e coeso.
+
+Por fim iremos fazer uma análise geral das regras e interconexões entre cards para garantir que todos se conversam em todos os sentidos e testar.

@@ -1,0 +1,1218 @@
+# Elgin AUX — controle avançado, sincronização passiva e atualização iFeel sem bip.
+input_boolean:
+  elgin_aux_ifeel:
+    name: "Elgin AUX - Conforto / I Feel"
+    icon: mdi:thermometer-auto
+
+  elgin_aux_turbo:
+    name: "Elgin AUX - Turbo"
+    icon: mdi:weather-windy
+
+  elgin_aux_sleep:
+    name: "Elgin AUX - Dormir"
+    icon: mdi:sleep
+
+  elgin_aux_health:
+    name: "Elgin AUX - Health / IonAir"
+    icon: mdi:air-filter
+
+  # Helper interno: ON quando funções avançadas foram alteradas depois
+  # do último envio completo.
+  elgin_aux_alteracoes_avancadas_pendentes:
+    name: "Elgin AUX - Alterações avançadas pendentes"
+    icon: mdi:database-alert
+    initial: false
+
+  # Helper interno. Enquanto ligado, mudanças de Sleep e Health vieram do
+  # estado físico LocalTuya e não devem ser marcadas como pendentes.
+  elgin_aux_sincronizacao_passiva_em_andamento:
+    name: "Elgin AUX - Sincronização passiva em andamento"
+    icon: mdi:sync
+    initial: false
+
+input_select:
+  elgin_aux_fonte_temperatura:
+    name: "Elgin AUX - Fonte da temperatura do I Feel"
+    icon: mdi:source-branch
+    options:
+      - "Manual"
+      - "Sensor dedicado"
+      - "Semi-automático"
+
+input_number:
+  elgin_aux_current_temperature:
+    name: "Elgin AUX - Temperatura manual"
+    icon: mdi:thermometer
+    min: 0
+    max: 50
+    step: 1
+    mode: box
+    unit_of_measurement: "°C"
+
+  elgin_aux_intervalo_atualizacao_silenciosa:
+    name: "Elgin AUX - Intervalo da atualização silenciosa"
+    icon: mdi:timer-sync
+    min: 0
+    max: 120
+    step: 1
+    mode: box
+    unit_of_measurement: "min"
+
+input_datetime:
+  elgin_aux_ultima_atualizacao_temperatura:
+    name: "Elgin AUX - Última atualização de temperatura"
+    icon: mdi:clock-check
+    has_date: true
+    has_time: true
+
+  elgin_aux_ultima_sincronizacao_localtuya:
+    name: "Elgin AUX - Última sincronização LocalTuya"
+    icon: mdi:sync-circle
+    has_date: true
+    has_time: true
+
+  elgin_aux_ultimo_reforco_ifeel_fisico:
+    name: Elgin AUX - Horário do último reforço iFeel físico
+    icon: mdi:clock-check-outline
+    has_date: true
+    has_time: true
+timer:
+  elgin_aux_bloqueio_reforco_ifeel_fisico:
+    name: Elgin AUX - Bloqueio do reforço iFeel físico
+    icon: mdi:thermometer-lock
+    duration: 00:00:10
+    restore: false
+template:
+  - sensor:
+      - name: "Elgin AUX - Temperatura efetiva de envio"
+        unique_id: elgin_aux_temperatura_efetiva_envio
+        device_class: temperature
+        state_class: measurement
+        unit_of_measurement: "°C"
+        availability: >
+          {% set fonte =
+               states('sensor.elgin_supervisor_fonte_ifeel_efetiva') %}
+          {% set manual_valido =
+               is_number(states('input_number.elgin_aux_current_temperature')) %}
+          {% set sensor_valido =
+               is_number(states('sensor.sensor_temperatura_sensor_dedicado')) %}
+          {% set alvo_valido =
+               states('climate.esp8266_elgin_aux_quarto')
+                 not in ['unknown', 'unavailable']
+               and is_number(state_attr(
+                 'climate.esp8266_elgin_aux_quarto', 'temperature'
+               )) %}
+          {{ (fonte == 'Manual' and manual_valido)
+             or (fonte == 'Sensor dedicado' and sensor_valido)
+             or (fonte == 'Semi-automático' and alvo_valido) }}
+        state: >
+          {% set fonte =
+               states('sensor.elgin_supervisor_fonte_ifeel_efetiva') %}
+          {% if fonte == 'Sensor dedicado' %}
+            {{ states('sensor.sensor_temperatura_sensor_dedicado')
+               | float | round(0) | int }}
+          {% elif fonte == 'Semi-automático' %}
+            {{ state_attr(
+                 'climate.esp8266_elgin_aux_quarto', 'temperature'
+               ) | float | round(0) | int }}
+          {% else %}
+            {{ states('input_number.elgin_aux_current_temperature')
+               | float | round(0) | int }}
+          {% endif %}
+        attributes:
+          fonte: >
+            {{ states('sensor.elgin_supervisor_fonte_ifeel_efetiva') }}
+          valor_original: >
+            {% set fonte =
+                 states('sensor.elgin_supervisor_fonte_ifeel_efetiva') %}
+            {% if fonte == 'Sensor dedicado' %}
+              {{ states('sensor.sensor_temperatura_sensor_dedicado') }}
+            {% elif fonte == 'Semi-automático' %}
+              {{ state_attr(
+                   'climate.esp8266_elgin_aux_quarto', 'temperature'
+                 ) }}
+            {% else %}
+              {{ states('input_number.elgin_aux_current_temperature') }}
+            {% endif %}
+          alvo_do_climate: >
+            {{ state_attr(
+                 'climate.esp8266_elgin_aux_quarto', 'temperature'
+               ) }}
+
+      - name: "Elgin AUX - Fonte da temperatura"
+        unique_id: elgin_aux_fonte_temperatura
+        icon: mdi:source-branch
+        state: >
+          {% set fonte =
+               states('sensor.elgin_supervisor_fonte_ifeel_efetiva') %}
+          {{ fonte if fonte in
+             ['Manual', 'Sensor dedicado', 'Semi-automático']
+             else 'Indisponível' }}
+
+      - name: "Elgin AUX - Minutos para próxima atualização"
+        unique_id: elgin_aux_minutos_proxima_atualizacao
+        icon: mdi:timer-sand
+        unit_of_measurement: "min"
+        state: >
+          {% set intervalo_min =
+               states('input_number.elgin_aux_intervalo_atualizacao_silenciosa')
+               | float(0) %}
+          {% if intervalo_min <= 0 %}
+            0
+          {% else %}
+            {% set ultima = as_timestamp(
+                 states('input_datetime.elgin_aux_ultima_atualizacao_temperatura'),
+                 0
+               ) %}
+            {% set restante =
+                 ultima + (intervalo_min * 60) - as_timestamp(now()) %}
+            {{ ([0, (restante / 60) | round(0, 'ceil') | int] | max) }}
+          {% endif %}
+        attributes:
+          atualizacao_automatica: >
+            {% if states(
+                 'input_number.elgin_aux_intervalo_atualizacao_silenciosa'
+               ) | float(0) <= 0 %}
+              desativada
+            {% else %}
+              ativada
+            {% endif %}
+
+  - binary_sensor:
+      - name: "Elgin AUX - Configuração avançada aplicada"
+        unique_id: elgin_aux_configuracao_avancada_aplicada
+        state: >
+          {{ is_state(
+               'binary_sensor.esp8266_elgin_aux_estado_base_valido', 'on'
+             )
+             and is_state(
+               'input_boolean.elgin_aux_alteracoes_avancadas_pendentes', 'off'
+             ) }}
+        icon: >
+          {% if this.state == 'on' %}
+            mdi:database-check
+          {% else %}
+            mdi:database-alert
+          {% endif %}
+
+      - name: "Elgin AUX - Atualização silenciosa disponível"
+        unique_id: elgin_aux_atualizacao_silenciosa_disponivel
+        state: >
+          {% set base = is_state(
+               'binary_sensor.esp8266_elgin_aux_estado_base_valido', 'on'
+             ) %}
+          {% set sem_pendencias = is_state(
+               'input_boolean.elgin_aux_alteracoes_avancadas_pendentes', 'off'
+             ) %}
+          {% set ifeel =
+               is_state('binary_sensor.elgin_supervisor_ifeel_efetivo', 'on') %}
+          {% set fonte =
+               states('sensor.elgin_supervisor_fonte_ifeel_efetiva') %}
+          {% set fonte_valida =
+               (fonte == 'Manual'
+                and is_number(
+                  states('input_number.elgin_aux_current_temperature')
+                ))
+               or (fonte == 'Sensor dedicado'
+                   and is_number(
+                     states('sensor.sensor_temperatura_sensor_dedicado')
+                   ))
+               or (fonte == 'Semi-automático'
+                   and states('climate.esp8266_elgin_aux_quarto')
+                     not in ['unknown', 'unavailable']
+                   and is_number(state_attr(
+                     'climate.esp8266_elgin_aux_quarto', 'temperature'
+                   ))) %}
+          {% set localtuya_power =
+               states(
+                 'switch.smart_air_conditioner_power_ar_condicionado_id_1'
+               ) %}
+          {% set ar_ligado =
+               localtuya_power == 'on'
+               or (
+                 localtuya_power in ['unknown', 'unavailable']
+                 and states('climate.esp8266_elgin_aux_quarto')
+                   not in ['off', 'unknown', 'unavailable']
+               ) %}
+          {{ base and sem_pendencias and ifeel and fonte_valida and ar_ligado }}
+        icon: >
+          {% if this.state == 'on' %}
+            mdi:thermometer-check
+          {% elif not is_state('binary_sensor.elgin_supervisor_ifeel_efetivo', 'on') %}
+            mdi:thermometer-off
+          {% else %}
+            mdi:thermometer-alert
+          {% endif %}
+        attributes:
+          motivo_bloqueio: >
+            {% set fonte =
+                 states('sensor.elgin_supervisor_fonte_ifeel_efetiva') %}
+            {% set fonte_valida =
+                 (fonte == 'Manual'
+                  and is_number(
+                    states('input_number.elgin_aux_current_temperature')
+                  ))
+                 or (fonte == 'Sensor dedicado'
+                     and is_number(
+                       states('sensor.sensor_temperatura_sensor_dedicado')
+                     ))
+                 or (fonte == 'Semi-automático'
+                     and states('climate.esp8266_elgin_aux_quarto')
+                       not in ['unknown', 'unavailable']
+                     and is_number(state_attr(
+                       'climate.esp8266_elgin_aux_quarto', 'temperature'
+                     ))) %}
+            {% set localtuya_power =
+                 states(
+                   'switch.smart_air_conditioner_power_ar_condicionado_id_1'
+                 ) %}
+            {% set ar_ligado =
+                 localtuya_power == 'on'
+                 or (
+                   localtuya_power in ['unknown', 'unavailable']
+                   and states('climate.esp8266_elgin_aux_quarto')
+                     not in ['off', 'unknown', 'unavailable']
+                 ) %}
+            {% if not is_state(
+                 'binary_sensor.esp8266_elgin_aux_estado_base_valido', 'on'
+               ) %}
+              O ESP foi reiniciado ou ainda não enviou um estado completo.
+            {% elif is_state(
+                 'input_boolean.elgin_aux_alteracoes_avancadas_pendentes', 'on'
+               ) %}
+              Existem alterações avançadas aguardando envio completo.
+            {% elif not is_state('binary_sensor.elgin_supervisor_ifeel_efetivo', 'on') %}
+              O I Feel está desligado.
+            {% elif not fonte_valida %}
+              A fonte selecionada está indisponível ou sem valor numérico.
+            {% elif not ar_ligado %}
+              O ar-condicionado está desligado.
+            {% else %}
+              Pronto para transmissão manual, sem intervalo mínimo.
+            {% endif %}
+          intervalo_automatico_minutos: >
+            {{ states(
+                 'input_number.elgin_aux_intervalo_atualizacao_silenciosa'
+               ) | float(0) }}
+          proxima_atualizacao_automatica_minutos: >
+            {{ states('sensor.elgin_aux_minutos_para_proxima_atualizacao')
+               | int(0) }}
+          power_observado_por: >
+            {% set lt =
+                 states(
+                   'switch.smart_air_conditioner_power_ar_condicionado_id_1'
+                 ) %}
+            {{ 'LocalTuya'
+               if lt not in ['unknown', 'unavailable']
+               else 'Climate (fallback)' }}
+
+script:
+  elgin_aux_enviar_estado_completo:
+    alias: "Elgin AUX - Aplicar funções avançadas"
+    description: >
+      Reenvia o estado atual do climate junto com I Feel, Turbo, Sleep, Health
+      e a fonte de temperatura selecionada. Este é o comando usado para aplicar
+      alterações avançadas.
+    icon: mdi:remote
+    mode: single
+    sequence:
+      - variables:
+          climate_id: climate.esp8266_elgin_aux_quarto
+          climate_estado: "{{ states('climate.esp8266_elgin_aux_quarto') }}"
+          power_envio: >
+            {{ states('climate.esp8266_elgin_aux_quarto')
+               not in ['off', 'unknown', 'unavailable'] }}
+          mode_envio: >
+            {% set modo = states('climate.esp8266_elgin_aux_quarto') %}
+            {% if modo == 'fan_only' %}
+              fan
+            {% elif modo in ['auto', 'cool', 'dry', 'heat'] %}
+              {{ modo }}
+            {% else %}
+              cool
+            {% endif %}
+          fan_envio: >
+            {{ state_attr(
+                 'climate.esp8266_elgin_aux_quarto', 'fan_mode'
+               ) | default('auto', true) }}
+          target_envio: >
+            {{ state_attr(
+                 'climate.esp8266_elgin_aux_quarto', 'temperature'
+               ) | float(24) | round(0) | int }}
+          swing_envio: >
+            {{ state_attr(
+                 'climate.esp8266_elgin_aux_quarto', 'swing_mode'
+               ) | default('off', true) }}
+          fonte_temperatura: >
+            {{ states('sensor.elgin_supervisor_fonte_ifeel_efetiva') }}
+          fonte_temperatura_valida: >
+            {% set fonte =
+                 states('sensor.elgin_supervisor_fonte_ifeel_efetiva') %}
+            {{ (fonte == 'Manual'
+                 and is_number(
+                   states('input_number.elgin_aux_current_temperature')
+                 ))
+               or (fonte == 'Sensor dedicado'
+                   and is_number(
+                     states('sensor.sensor_temperatura_sensor_dedicado')
+                   ))
+               or (fonte == 'Semi-automático'
+                   and climate_estado not in ['unknown', 'unavailable']
+                   and is_number(state_attr(
+                     'climate.esp8266_elgin_aux_quarto', 'temperature'
+                   ))) }}
+          temperatura_envio: >
+            {% set fonte =
+                 states('sensor.elgin_supervisor_fonte_ifeel_efetiva') %}
+            {% if fonte == 'Sensor dedicado' %}
+              {{ states('sensor.sensor_temperatura_sensor_dedicado')
+                 | float | round(0) | int }}
+            {% elif fonte == 'Semi-automático' %}
+              {{ state_attr(
+                   'climate.esp8266_elgin_aux_quarto', 'temperature'
+                 ) | float | round(0) | int }}
+            {% else %}
+              {{ states('input_number.elgin_aux_current_temperature')
+                 | float | round(0) | int }}
+            {% endif %}
+
+      - if:
+          - condition: template
+            value_template: >
+              {{ climate_estado in ['unknown', 'unavailable'] }}
+        then:
+          - stop: >
+              O climate Elgin AUX está indisponível. Aguarde o ESP reconectar.
+            error: true
+
+      - if:
+          - condition: template
+            value_template: >
+              {{ not (fonte_temperatura_valida | bool) }}
+        then:
+          - stop: >
+              A fonte de temperatura selecionada está indisponível ou não
+              possui valor numérico.
+            error: true
+
+      - if:
+          - condition: template
+            value_template: >
+              {{ is_state('binary_sensor.elgin_supervisor_turbo_efetivo', 'on')
+                 and fan_envio != 'high' }}
+        then:
+          - stop: "Combinação inválida: Turbo exige ventilação high."
+            error: true
+
+      - action: esphome.esp8266_elgin_send_state
+        data:
+          power: "{{ power_envio }}"
+          mode: "{{ mode_envio | trim }}"
+          fan: "{{ fan_envio | trim }}"
+          target_temperature: "{{ target_envio | int }}"
+          current_temperature: "{{ temperatura_envio | int }}"
+          ifeel: "{{ is_state('binary_sensor.elgin_supervisor_ifeel_efetivo', 'on') }}"
+          swing_vertical: >
+            {{ swing_envio in ['vertical', 'both'] }}
+          swing_horizontal: >
+            {{ swing_envio in ['horizontal', 'both'] }}
+          turbo: "{{ is_state('binary_sensor.elgin_supervisor_turbo_efetivo', 'on') }}"
+          sleep_enabled: >
+            {{ is_state('binary_sensor.elgin_supervisor_sleep_efetivo', 'on') }}
+          health: "{{ is_state('binary_sensor.elgin_supervisor_health_efetivo', 'on') }}"
+          command: >
+            {{ 'temperature_up' if power_envio else 'power' }}
+
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.elgin_aux_alteracoes_avancadas_pendentes
+
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.elgin_aux_ultima_atualizacao_temperatura
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  elgin_aux_atualizar_temperatura_silenciosa:
+    alias: "Elgin AUX - Atualizar temperatura silenciosamente"
+    description: >
+      Atualiza somente a temperatura remota, sem bip e sem intervalo mínimo
+      entre execuções manuais. Exige aparelho ligado, base nativa válida,
+      nenhuma função avançada pendente, I Feel ligado e fonte válida.
+    icon: mdi:volume-off
+    mode: single
+    sequence:
+      - variables:
+          fonte_temperatura: >
+            {{ states('sensor.elgin_supervisor_fonte_ifeel_efetiva') }}
+          fonte_temperatura_valida: >
+            {% set fonte =
+                 states('sensor.elgin_supervisor_fonte_ifeel_efetiva') %}
+            {{ (fonte == 'Manual'
+                 and is_number(
+                   states('input_number.elgin_aux_current_temperature')
+                 ))
+               or (fonte == 'Sensor dedicado'
+                   and is_number(
+                     states('sensor.sensor_temperatura_sensor_dedicado')
+                   ))
+               or (fonte == 'Semi-automático'
+                   and states('climate.esp8266_elgin_aux_quarto')
+                     not in ['unknown', 'unavailable']
+                   and is_number(state_attr(
+                     'climate.esp8266_elgin_aux_quarto', 'temperature'
+                   ))) }}
+          temperatura_envio: >
+            {% set fonte =
+                 states('sensor.elgin_supervisor_fonte_ifeel_efetiva') %}
+            {% if fonte == 'Sensor dedicado' %}
+              {{ states('sensor.sensor_temperatura_sensor_dedicado')
+                 | float | round(0) | int }}
+            {% elif fonte == 'Semi-automático' %}
+              {{ state_attr(
+                   'climate.esp8266_elgin_aux_quarto', 'temperature'
+                 ) | float | round(0) | int }}
+            {% else %}
+              {{ states('input_number.elgin_aux_current_temperature')
+                 | float | round(0) | int }}
+            {% endif %}
+          ar_ligado: >
+            {% set localtuya_power =
+                 states(
+                   'switch.smart_air_conditioner_power_ar_condicionado_id_1'
+                 ) %}
+            {{ localtuya_power == 'on'
+               or (
+                 localtuya_power in ['unknown', 'unavailable']
+                 and states('climate.esp8266_elgin_aux_quarto')
+                   not in ['off', 'unknown', 'unavailable']
+               ) }}
+
+      - if:
+          - condition: template
+            value_template: >
+              {{ not (ar_ligado | bool) }}
+        then:
+          - stop: >
+              A atualização silenciosa exige o ar-condicionado ligado.
+            error: true
+
+      - if:
+          - condition: state
+            entity_id: binary_sensor.esp8266_elgin_aux_estado_base_valido
+            state: "off"
+        then:
+          - stop: >
+              O ESP não possui estado-base válido. Envie um comando pelo
+              climate ou aplique as funções avançadas primeiro.
+            error: true
+
+      - if:
+          - condition: state
+            entity_id: input_boolean.elgin_aux_alteracoes_avancadas_pendentes
+            state: "on"
+        then:
+          - stop: >
+              Existem alterações avançadas pendentes. Use primeiro
+              Aplicar funções avançadas.
+            error: true
+
+      - if:
+          - condition: state
+            entity_id: binary_sensor.elgin_supervisor_ifeel_efetivo
+            state: "off"
+        then:
+          - stop: >
+              A atualização silenciosa está bloqueada porque o I Feel está
+              desligado.
+            error: true
+
+      - if:
+          - condition: template
+            value_template: >
+              {{ not (fonte_temperatura_valida | bool) }}
+        then:
+          - stop: >
+              A fonte de temperatura selecionada está indisponível ou não
+              possui valor numérico.
+            error: true
+
+      - if:
+          - condition: template
+            value_template: |
+              {{ is_state('script.elgin_supervisor_transmitir_estado','on') or not is_state('timer.elgin_supervisor_janela_reconciliacao','idle') }}
+        then:
+          - stop: Transmissão completa ou reconciliação do Supervisor em andamento; SensorUpdate adiado.
+            error: false
+      - action: esphome.esp8266_elgin_update_sensor_temperature
+        data:
+          current_temperature: "{{ temperatura_envio | int }}"
+
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.elgin_aux_ultima_atualizacao_temperatura
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+
+  elgin_aux_reforcar_ifeel_apos_comando_fisico:
+    alias: Elgin AUX - Reforçar iFeel após comando físico
+    description: Envia um SensorUpdate silencioso com 100% da temperatura efetiva selecionada no Elgin AUX depois de uma mudança externa detectada pelo LocalTuya.
+    icon: mdi:thermometer-sync
+    mode: single
+    max_exceeded: silent
+    fields:
+      origem:
+        name: Entidade LocalTuya de origem
+        description: Entidade que iniciou a consolidação física.
+        required: false
+        selector:
+          text:
+    sequence:
+      - variables:
+          fonte_temperatura: |-
+            {{ states('sensor.elgin_supervisor_fonte_ifeel_efetiva') }}
+          temperatura_envio: |-
+            {{ states('sensor.elgin_supervisor_temperatura_ifeel_efetiva') | float | round(0) | int }}
+          temperatura_valida: |-
+            {{ is_number(states('sensor.elgin_supervisor_temperatura_ifeel_efetiva')) }}
+          origem_final: |-
+            {{ origem | default('mudança consolidada do LocalTuya', true) }}
+      - if:
+          - condition: template
+            value_template: |-
+              {{ not (temperatura_valida | bool) }}
+        then:
+          - stop: A fonte de temperatura do iFeel não possui valor numérico válido.
+            error: true
+      - if:
+          - condition: state
+            entity_id: binary_sensor.elgin_supervisor_ifeel_efetivo
+            state: "off"
+        then:
+          - stop: O iFeel está desligado; reforço dispensado.
+            error: false
+      - if:
+          - condition: state
+            entity_id: switch.smart_air_conditioner_power_ar_condicionado_id_1
+            state: "off"
+        then:
+          - stop: O aparelho está desligado; reforço dispensado.
+            error: false
+      - if:
+          - condition: state
+            entity_id: binary_sensor.esp8266_elgin_aux_estado_base_valido
+            state: "off"
+        then:
+          - stop: O estado-base ainda não foi reconstruído; SensorUpdate cancelado.
+            error: true
+      - if:
+          - condition: template
+            value_template: |-
+              {{ is_state('script.elgin_supervisor_transmitir_estado','on')
+                 or not is_state('timer.elgin_supervisor_janela_reconciliacao','idle') }}
+        then:
+          - stop: >
+              O estado veio de um IR completo do Supervisor, que já contém a
+              temperatura do iFeel; reforço adicional suprimido.
+            error: false
+      - if:
+          - condition: template
+            value_template: |-
+              {{ not is_state('timer.elgin_aux_bloqueio_reforco_ifeel_fisico','idle') }}
+        then:
+          - stop: Reforço iFeel físico recente; SensorUpdate duplicado suprimido.
+            error: false
+      - action: timer.start
+        target:
+          entity_id: timer.elgin_aux_bloqueio_reforco_ifeel_fisico
+        data:
+          duration: 00:00:10
+      - action: esphome.esp8266_elgin_update_sensor_temperature
+        data:
+          current_temperature: |-
+            {{ temperatura_envio | int }}
+      - action: input_datetime.set_datetime
+        target:
+          entity_id:
+            - input_datetime.elgin_aux_ultima_atualizacao_temperatura
+            - input_datetime.elgin_aux_ultimo_reforco_ifeel_fisico
+        data:
+          datetime: |-
+            {{ now().strftime('%Y-%m-%d %H:%M:%S') }}
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.elgin_aux_ultimo_reforco_ifeel_fisico
+        data:
+          value: |-
+            {{ ('Enviado silenciosamente ' ~ temperatura_envio ~ '°C pela fonte ' ~ fonte_temperatura ~ ' após ' ~ origem_final ~ '.') | truncate(255, true, '') }}
+  elgin_aux_alternar_visor:
+    alias: "Elgin AUX - Alternar visor"
+    description: >
+      Alterna o visor da evaporadora. O protocolo é um toggle e não informa
+      se o visor terminou ligado ou desligado.
+    icon: mdi:television-ambient-light
+    mode: single
+    sequence:
+      - if:
+          - condition: state
+            entity_id: binary_sensor.esp8266_elgin_aux_estado_base_valido
+            state: "off"
+        then:
+          - stop: >
+              O comando de visor exige um estado-base válido. Envie primeiro
+              um comando pelo Climate ou aplique as funções avançadas.
+            error: true
+
+      - if:
+          - condition: state
+            entity_id: input_boolean.elgin_aux_alteracoes_avancadas_pendentes
+            state: "on"
+        then:
+          - stop: >
+              Existem funções avançadas pendentes. Aplique-as antes de
+              alternar o visor para preservar o estado desejado.
+            error: true
+
+      - if:
+          - condition: state
+            entity_id: climate.esp8266_elgin_aux_quarto
+            state: "off"
+        then:
+          - stop: >
+              O visor só pode ser alternado enquanto o aparelho está ligado.
+            error: true
+
+      - action: esphome.esp8266_elgin_toggle_display
+
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.elgin_aux_ultima_atualizacao_temperatura
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  elgin_aux_iniciar_clean:
+    alias: "Elgin AUX - Iniciar Clean"
+    description: >
+      Inicia o ciclo especial de limpeza. O aparelho precisa ter sido
+      desligado pelo Climate após o último boot do ESP.
+    icon: mdi:air-filter
+    mode: single
+    sequence:
+      - if:
+          - condition: state
+            entity_id: binary_sensor.esp8266_elgin_aux_estado_base_valido
+            state: "off"
+        then:
+          - stop: >
+              O Clean exige uma confirmação real de desligamento. Desligue o
+              aparelho pelo Climate após o boot e tente novamente.
+            error: true
+
+      - if:
+          - condition: template
+            value_template: >
+              {{ not is_state('climate.esp8266_elgin_aux_quarto', 'off') }}
+        then:
+          - stop: >
+              Desligue primeiro o aparelho pelo Climate para iniciar o Clean.
+            error: true
+
+      - action: esphome.esp8266_elgin_start_clean
+
+automation:
+  - id: elgin_aux_marcar_funcoes_avancadas_pendentes
+    alias: "Elgin AUX - Marcar funções avançadas pendentes"
+    description: >
+      I Feel, Turbo, Sleep e Health só são aplicados ao ar por um novo estado
+      completo. Alterações restauradas durante a inicialização são ignoradas.
+    triggers:
+      - trigger: state
+        entity_id:
+          - input_boolean.elgin_aux_ifeel
+          - input_boolean.elgin_aux_turbo
+          - input_boolean.elgin_aux_sleep
+          - input_boolean.elgin_aux_health
+    conditions:
+      - condition: state
+        entity_id: input_boolean.elgin_aux_sincronizacao_passiva_em_andamento
+        state: "off"
+      - condition: template
+        value_template: >
+          {{ trigger.from_state is not none
+             and trigger.from_state.state not in ['unknown', 'unavailable'] }}
+    actions:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.elgin_aux_alteracoes_avancadas_pendentes
+    mode: restart
+
+  - id: elgin_aux_sincronizar_estado_observado_localtuya
+    alias: "Elgin AUX - Sincronizar estado observado do LocalTuya"
+    description: >-
+      Consolida o estado físico do LocalTuya, importa-o no ESPHome sem IR, atualiza o Climate e reconstrói o frame-base. Quando a mudança
+      é externa e o iFeel está ligado, envia também um SensorUpdate silencioso com a temperatura efetiva configurada no Elgin AUX.
+    triggers:
+      - trigger: state
+        id: localtuya
+        entity_id:
+          - switch.smart_air_conditioner_power_ar_condicionado_id_1
+          - select.smart_air_conditioner_mode_ar_condicionado_id_4
+          - select.smart_air_conditioner_windspeed_ar_condicionado_id_5
+          - number.smart_air_conditioner_temperatura_alvo_ar_condicionado_id_2
+          - switch.smart_air_conditioner_swing_ar_condicionado_id_33
+          - switch.smart_air_conditioner_up_down_wind_ar_condicionado_id_105
+          - switch.smart_air_conditioner_sleep_ar_condicionado_id_102
+          - switch.smart_air_conditioner_health_ar_condicionado_id_106
+      - trigger: homeassistant
+        id: inicio
+        event: start
+      - trigger: state
+        id: esp_reconectou
+        entity_id: climate.esp8266_elgin_aux_quarto
+        from: "unavailable"
+      - trigger: state
+        id: esp_inicializou
+        entity_id: climate.esp8266_elgin_aux_quarto
+        from: "unknown"
+    actions:
+      # mode: restart abaixo transforma várias atualizações parciais dos DPs
+      # em uma única importação consolidada.
+      - delay: >
+          {{ '00:00:10' if trigger.id == 'inicio' else '00:00:02' }}
+
+      - variables:
+          modo_observado: >
+            {% set x =
+                 states(
+                   'select.smart_air_conditioner_mode_ar_condicionado_id_4'
+                 ) %}
+            {{ {
+              'Frio':'cool',
+              'Quente':'heat',
+              'Desumidificar':'dry',
+              'Ventilar':'fan',
+              'Automático':'auto'
+            }.get(x, 'unknown') }}
+          fan_observado: >
+            {% set x =
+                 states(
+                   'select.smart_air_conditioner_windspeed_ar_condicionado_id_5'
+                 ) %}
+            {{ {
+              'Baixa':'low',
+              'Média':'medium',
+              'Alta':'high',
+              'Automática':'auto',
+              'Silencioso':'low'
+            }.get(x, 'unknown') }}
+          alvo_observado: >
+            {{ (
+              states(
+                'number.smart_air_conditioner_temperatura_alvo_ar_condicionado_id_2'
+              ) | float(240) / 10
+            ) | round(0) | int }}
+          temperatura_ifeel_observada: >
+            {% set fonte =
+                 states('sensor.elgin_supervisor_fonte_ifeel_efetiva') %}
+            {% set efetiva =
+                 states('sensor.elgin_supervisor_temperatura_ifeel_efetiva') %}
+            {% if fonte == 'Semi-automático' %}
+              {{ (
+                states(
+                  'number.smart_air_conditioner_temperatura_alvo_ar_condicionado_id_2'
+                ) | float(240) / 10
+              ) | round(0) | int }}
+            {% elif is_number(efetiva) %}
+              {{ efetiva | float | round(0) | int }}
+            {% elif is_number(
+                 states('sensor.sensor_temperatura_sensor_dedicado')
+               ) %}
+              {{ states('sensor.sensor_temperatura_sensor_dedicado')
+                 | float | round(0) | int }}
+            {% else %}
+              20
+            {% endif %}
+          fontes_observadas_validas: >
+            {{ states(
+                 'switch.smart_air_conditioner_power_ar_condicionado_id_1'
+               ) in ['on', 'off']
+               and modo_observado != 'unknown'
+               and fan_observado != 'unknown'
+               and is_number(states(
+                 'number.smart_air_conditioner_temperatura_alvo_ar_condicionado_id_2'
+               ))
+               and states(
+                 'switch.smart_air_conditioner_swing_ar_condicionado_id_33'
+               ) in ['on', 'off']
+               and states(
+                 'switch.smart_air_conditioner_up_down_wind_ar_condicionado_id_105'
+               ) in ['on', 'off']
+               and states(
+                 'switch.smart_air_conditioner_sleep_ar_condicionado_id_102'
+               ) in ['on', 'off']
+               and states(
+                 'switch.smart_air_conditioner_health_ar_condicionado_id_106'
+               ) in ['on', 'off']
+               and states('climate.esp8266_elgin_aux_quarto')
+                 not in ['unknown', 'unavailable'] }}
+
+          climate_modo_antes: |-
+            {% set modo = states('climate.esp8266_elgin_aux_quarto') %}
+            {{ 'fan' if modo == 'fan_only' else modo }}
+          climate_power_antes: |-
+            {{ states('climate.esp8266_elgin_aux_quarto')
+               not in ['off','unknown','unavailable'] }}
+          climate_fan_antes: |-
+            {{ state_attr('climate.esp8266_elgin_aux_quarto','fan_mode')
+               | default('unknown', true) }}
+          climate_swing_antes: |-
+            {{ state_attr('climate.esp8266_elgin_aux_quarto','swing_mode')
+               | default('off', true) }}
+          climate_alvo_antes: |-
+            {% set alvo = state_attr('climate.esp8266_elgin_aux_quarto','temperature') %}
+            {{ alvo | float | round(0) | int if is_number(alvo) else -999 }}
+          estado_observado_ja_coincidia: |-
+            {% set power_obs =
+                 is_state('switch.smart_air_conditioner_power_ar_condicionado_id_1','on') %}
+            {% set swing_obs =
+                 'both'
+                 if is_state(
+                   'switch.smart_air_conditioner_up_down_wind_ar_condicionado_id_105','on'
+                 ) and is_state(
+                   'switch.smart_air_conditioner_swing_ar_condicionado_id_33','on'
+                 )
+                 else 'vertical'
+                 if is_state(
+                   'switch.smart_air_conditioner_up_down_wind_ar_condicionado_id_105','on'
+                 )
+                 else 'horizontal'
+                 if is_state(
+                   'switch.smart_air_conditioner_swing_ar_condicionado_id_33','on'
+                 )
+                 else 'off' %}
+            {% set alvo_relevante = modo_observado in ['cool','heat','dry'] %}
+            {% set alvo_igual =
+                 not alvo_relevante or climate_alvo_antes | int == alvo_observado | int %}
+            {% set sleep_igual =
+                 is_state('binary_sensor.elgin_supervisor_sleep_efetivo','on')
+                 == is_state(
+                   'switch.smart_air_conditioner_sleep_ar_condicionado_id_102','on'
+                 ) %}
+            {% set health_igual =
+                 is_state('binary_sensor.elgin_supervisor_health_efetivo','on')
+                 == is_state(
+                   'switch.smart_air_conditioner_health_ar_condicionado_id_106','on'
+                 ) %}
+            {{ (climate_power_antes | bool) == power_obs
+               and climate_modo_antes | trim == modo_observado | trim
+               and climate_fan_antes | trim == fan_observado | trim
+               and climate_swing_antes | trim == swing_obs
+               and alvo_igual
+               and sleep_igual
+               and health_igual }}
+          temperatura_reforco_valida: |-
+            {{ is_number(states('sensor.elgin_supervisor_temperatura_ifeel_efetiva')) }}
+      - if:
+          - condition: template
+            value_template: >
+              {{ not (fontes_observadas_validas | bool) }}
+        then:
+          - stop: >
+              Sincronização passiva adiada: LocalTuya ou ESPHome ainda possui
+              campos indisponíveis.
+            error: false
+
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.elgin_aux_sincronizacao_passiva_em_andamento
+
+      # Sleep e Health possuem retorno físico real pelo LocalTuya.
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: switch.smart_air_conditioner_sleep_ar_condicionado_id_102
+                state: "on"
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.elgin_aux_sleep
+        default:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.elgin_aux_sleep
+
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: switch.smart_air_conditioner_health_ar_condicionado_id_106
+                state: "on"
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.elgin_aux_health
+        default:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.elgin_aux_health
+
+      - action: esphome.esp8266_elgin_import_observed_state
+        continue_on_error: true
+        data:
+          power: >
+            {{ is_state(
+              'switch.smart_air_conditioner_power_ar_condicionado_id_1', 'on'
+            ) }}
+          mode: "{{ modo_observado | trim }}"
+          fan: "{{ fan_observado | trim }}"
+          target_temperature: "{{ alvo_observado | int }}"
+          current_temperature: "{{ temperatura_ifeel_observada | int }}"
+          swing_vertical: >
+            {{ is_state(
+              'switch.smart_air_conditioner_up_down_wind_ar_condicionado_id_105',
+              'on'
+            ) }}
+          swing_horizontal: >
+            {{ is_state(
+              'switch.smart_air_conditioner_swing_ar_condicionado_id_33', 'on'
+            ) }}
+          sleep_enabled: >
+            {{ is_state(
+              'switch.smart_air_conditioner_sleep_ar_condicionado_id_102', 'on'
+            ) }}
+          health: >
+            {{ is_state(
+              'switch.smart_air_conditioner_health_ar_condicionado_id_106', 'on'
+            ) }}
+          advanced_values_authoritative: >
+            {{ is_state(
+              'input_boolean.elgin_aux_alteracoes_avancadas_pendentes', 'off'
+            ) }}
+          ifeel: "{{ is_state('binary_sensor.elgin_supervisor_ifeel_efetivo', 'on') }}"
+          turbo: "{{ is_state('binary_sensor.elgin_supervisor_turbo_efetivo', 'on') }}"
+
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: |-
+                  {{ trigger.id == 'localtuya' }}
+              - condition: state
+                entity_id: switch.smart_air_conditioner_power_ar_condicionado_id_1
+                state: "on"
+              - condition: state
+                entity_id: binary_sensor.elgin_supervisor_ifeel_efetivo
+                state: "on"
+              - condition: template
+                value_template: |-
+                  {{ temperatura_reforco_valida | bool }}
+              - condition: template
+                value_template: |-
+                  {{ not (estado_observado_ja_coincidia | bool) }}
+              - condition: template
+                value_template: |-
+                  {{ is_state('timer.elgin_supervisor_janela_reconciliacao','idle')
+                     and not is_state('script.elgin_supervisor_transmitir_estado','on') }}
+            sequence:
+              - action: script.elgin_aux_reforcar_ifeel_apos_comando_fisico
+                continue_on_error: true
+                data:
+                  origem: |-
+                    {{ trigger.entity_id | default('mudança consolidada do LocalTuya', true) }}
+          - conditions:
+              - condition: template
+                value_template: |-
+                  {{ trigger.id == 'localtuya' }}
+              - condition: state
+                entity_id: switch.smart_air_conditioner_power_ar_condicionado_id_1
+                state: "on"
+              - condition: state
+                entity_id: binary_sensor.elgin_supervisor_ifeel_efetivo
+                state: "on"
+              - condition: template
+                value_template: |-
+                  {{ estado_observado_ja_coincidia | bool }}
+            sequence:
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.elgin_aux_ultimo_reforco_ifeel_fisico
+                data:
+                  value: |-
+                    {{ ('Dispensado: o estado observado já coincidia com o Climate e já veio de um comando completo com a temperatura do iFeel. Origem: ' ~ (trigger.entity_id | default('LocalTuya', true)) ~ '.') | truncate(255, true, '') }}
+          - conditions:
+              - condition: template
+                value_template: |-
+                  {{ trigger.id == 'localtuya' }}
+              - condition: state
+                entity_id: switch.smart_air_conditioner_power_ar_condicionado_id_1
+                state: "on"
+              - condition: state
+                entity_id: binary_sensor.elgin_supervisor_ifeel_efetivo
+                state: "on"
+              - condition: template
+                value_template: |-
+                  {{ not (temperatura_reforco_valida | bool) }}
+            sequence:
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.elgin_aux_ultimo_reforco_ifeel_fisico
+                data:
+                  value: 'Não enviado: a fonte de temperatura selecionada no Elgin AUX está indisponível ou não é numérica.'
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.elgin_aux_ultima_sincronizacao_localtuya
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.elgin_aux_sincronizacao_passiva_em_andamento
+
+    mode: restart
+    max_exceeded: silent
+
+  - id: elgin_aux_registrar_envio_completo_do_climate
+    alias: "Elgin AUX - Registrar comando completo do climate"
+    description: >-
+      Registra alterações do Climate que não ocorreram durante a importação passiva. Importar LocalTuya para o Climate não conta como
+      envio IR.
+    triggers:
+      - trigger: state
+        entity_id: climate.esp8266_elgin_aux_quarto
+    conditions:
+      - condition: state
+        entity_id: binary_sensor.esp8266_elgin_aux_estado_base_valido
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.elgin_aux_sincronizacao_passiva_em_andamento
+        state: "off"
+      - condition: template
+        value_template: >
+          {{ trigger.from_state is not none
+             and trigger.to_state is not none
+             and trigger.to_state.state not in ['unknown', 'unavailable'] }}
+    actions:
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.elgin_aux_ultima_atualizacao_temperatura
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+    mode: restart
+
+  - id: elgin_aux_atualizacao_periodica_temperatura
+    alias: "Elgin AUX - Atualização periódica da temperatura"
+    description: >
+      Repete SensorUpdate quando o intervalo termina, mesmo que a temperatura
+      não tenha mudado.
+    triggers:
+      - trigger: time_pattern
+        minutes: "/1"
+    conditions:
+      - condition: template
+        value_template: >
+          {{ is_state('timer.elgin_supervisor_janela_reconciliacao','idle')
+             and not is_state('script.elgin_supervisor_transmitir_estado','on') }}
+      - condition: template
+        value_template: >
+          {% set localtuya_power =
+               states(
+                 'switch.smart_air_conditioner_power_ar_condicionado_id_1'
+               ) %}
+          {{ localtuya_power == 'on'
+             or (
+               localtuya_power in ['unknown', 'unavailable']
+               and states('climate.esp8266_elgin_aux_quarto')
+                 not in ['off', 'unknown', 'unavailable']
+             ) }}
+      - condition: state
+        entity_id: binary_sensor.esp8266_elgin_aux_estado_base_valido
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.elgin_aux_alteracoes_avancadas_pendentes
+        state: "off"
+      - condition: state
+        entity_id: binary_sensor.elgin_supervisor_ifeel_efetivo
+        state: "on"
+      - condition: template
+        value_template: >
+          {{ states(
+               'input_number.elgin_aux_intervalo_atualizacao_silenciosa'
+             ) | float(0) > 0 }}
+      - condition: template
+        value_template: >
+          {% set fonte =
+               states('sensor.elgin_supervisor_fonte_ifeel_efetiva') %}
+          {{ (fonte == 'Manual'
+               and is_number(
+                 states('input_number.elgin_aux_current_temperature')
+               ))
+             or (fonte == 'Sensor dedicado'
+                 and is_number(
+                   states('sensor.sensor_temperatura_sensor_dedicado')
+                 ))
+             or (fonte == 'Semi-automático'
+                 and states('climate.esp8266_elgin_aux_quarto')
+                   not in ['unknown', 'unavailable']
+                 and is_number(state_attr(
+                   'climate.esp8266_elgin_aux_quarto', 'temperature'
+                 ))) }}
+      - condition: template
+        value_template: >
+          {% set ultima = as_timestamp(
+               states('input_datetime.elgin_aux_ultima_atualizacao_temperatura'),
+               0
+             ) %}
+          {% set intervalo =
+               states('input_number.elgin_aux_intervalo_atualizacao_silenciosa')
+               | float(0) * 60 %}
+          {{ intervalo > 0
+             and as_timestamp(now()) - ultima >= intervalo }}
+    actions:
+      - action: script.elgin_aux_atualizar_temperatura_silenciosa
+    mode: single
+  - id: elgin_aux_watchdog_sincronizacao_passiva
+    alias: Elgin AUX - Watchdog da sincronização passiva
+    description: Libera a trava interna caso uma sincronização passiva permaneça ativa por mais de 30 segundos.
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.elgin_aux_sincronizacao_passiva_em_andamento
+        to: 'on'
+        for: 00:00:30
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.elgin_aux_sincronizacao_passiva_em_andamento
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.elgin_aux_ultimo_reforco_ifeel_fisico
+        data:
+          value: 'Watchdog: a sincronização passiva excedeu 30 segundos e a trava interna foi liberada. Verifique o rastreamento da automação LocalTuya.'
+    mode: restart
+  - id: elgin_aux_reaplicar_ifeel_efetivo_da_agenda
+    alias: Elgin AUX - Reaplicar I Feel efetivo da Agenda
+    description: Atualiza silenciosamente a temperatura remota quando a Agenda altera o I Feel ou sua fonte, sem gerar frame HVAC completo.
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.elgin_supervisor_ifeel_efetivo
+      - trigger: state
+        entity_id: sensor.elgin_supervisor_fonte_ifeel_efetiva
+    conditions:
+      - condition: state
+        entity_id: binary_sensor.elgin_supervisor_ifeel_efetivo
+        state: "on"
+      - condition: state
+        entity_id: switch.smart_air_conditioner_power_ar_condicionado_id_1
+        state: "on"
+    actions:
+      - wait_template: |
+          {{ is_state('script.elgin_supervisor_transmitir_estado','off') and is_state('timer.elgin_supervisor_janela_reconciliacao','idle') }}
+        timeout: 00:00:40
+        continue_on_timeout: false
+      - delay: 00:00:01
+      - action: script.elgin_aux_atualizar_temperatura_silenciosa
+        continue_on_error: true
+    mode: restart
+input_text:
+  elgin_aux_ultimo_reforco_ifeel_fisico:
+    name: Elgin AUX - Último reforço iFeel após comando físico
+    icon: mdi:thermometer-sync
+    max: 255

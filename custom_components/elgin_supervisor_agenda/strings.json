@@ -1,0 +1,63 @@
+{
+  "title": "Elgin Supervisor Agenda",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Criar agenda do Supervisor",
+        "description": "Cria o calendário local e o motor de políticas temporais.",
+        "data": {
+          "name": "Nome"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "A agenda já foi configurada."
+    }
+  },
+  "services": {
+    "save_preset": {
+      "name": "Salvar preset de condição",
+      "description": "Cria ou atualiza um preset independente por modo."
+    },
+    "delete_preset": {
+      "name": "Excluir preset de condição",
+      "description": "Exclui um preset não protegido."
+    },
+    "set_base_preset": {
+      "name": "Definir preset base",
+      "description": "Seleciona o preset base persistente do modo."
+    },
+    "save_power_profile": {
+      "name": "Salvar perfil de potência",
+      "description": "Cria ou atualiza um perfil persistente por modo."
+    },
+    "delete_power_profile": {
+      "name": "Excluir perfil de potência",
+      "description": "Exclui um perfil não protegido."
+    },
+    "set_base_power_profile": {
+      "name": "Definir potência base",
+      "description": "Seleciona a potência base e fallback persistente do modo."
+    },
+    "save_power_rule": {
+      "name": "Salvar regra automática",
+      "description": "Cria ou atualiza uma regra dinâmica de histerese."
+    },
+    "delete_power_rule": {
+      "name": "Excluir regra automática",
+      "description": "Exclui uma regra dinâmica de potência."
+    },
+    "set_power_rule_enabled": {
+      "name": "Habilitar regra automática",
+      "description": "Habilita ou desabilita uma regra dinâmica."
+    },
+    "update_power_settings": {
+      "name": "Atualizar limites e prioridades",
+      "description": "Atualiza limites locais, prioridades e continuidade."
+    },
+    "restore_default_power_profiles": {
+      "name": "Restaurar perfis padrões",
+      "description": "Restaura somente perfis protegidos em condição segura."
+    }
+  }
+}
