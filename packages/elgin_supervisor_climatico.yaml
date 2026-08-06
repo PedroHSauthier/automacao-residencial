@@ -645,6 +645,10 @@ input_text:
     name: Elgin Supervisor - Assinatura do último IR completo
     icon: mdi:fingerprint
     max: 255
+  elgin_supervisor_assinatura_localtuya_esperada:
+    name: Elgin Supervisor - Assinatura LocalTuya esperada
+    icon: mdi:fingerprint
+    max: 255
   elgin_supervisor_ultimo_envio_ir:
     name: Elgin Supervisor - Diagnóstico do último IR completo
     icon: mdi:remote
@@ -1286,6 +1290,23 @@ template:
         {% elif vertical %}vertical
         {% elif horizontal %}horizontal
         {% else %}off{% endif %}
+      assinatura: |-
+        {% set power = is_state('switch.smart_air_conditioner_power_ar_condicionado_id_1','on') %}
+        {% set mode = {'Frio':'cool','Quente':'heat','Desumidificar':'dry','Ventilar':'fan','Automático':'auto'}.get(states('select.smart_air_conditioner_mode_ar_condicionado_id_4'),'unknown') %}
+        {% set fan = {'Baixa':'low','Média':'medium','Alta':'high','Automática':'auto','Silencioso':'quiet'}.get(states('select.smart_air_conditioner_windspeed_ar_condicionado_id_5'),'unknown') %}
+        {% set alvo_raw = states('number.smart_air_conditioner_temperatura_alvo_ar_condicionado_id_2') %}
+        {% set alvo = (alvo_raw | float(240) / 10) | round(0) | int %}
+        {% set vertical = is_state('switch.smart_air_conditioner_up_down_wind_ar_condicionado_id_105','on') %}
+        {% set horizontal = is_state('switch.smart_air_conditioner_swing_ar_condicionado_id_33','on') %}
+        {% set swing = 'both' if vertical and horizontal else 'vertical' if vertical else 'horizontal' if horizontal else 'off' %}
+        {{ ('p=' ~ (1 if power else 0)
+            ~ '|m=' ~ mode
+            ~ '|f=' ~ fan
+            ~ '|t=' ~ alvo
+            ~ '|s=' ~ swing
+            ~ '|sl=' ~ (1 if is_state('switch.smart_air_conditioner_sleep_ar_condicionado_id_102','on') else 0)
+            ~ '|h=' ~ (1 if is_state('switch.smart_air_conditioner_health_ar_condicionado_id_106','on') else 0))
+           | truncate(255, true, '') }}
   - name: Elgin Supervisor - Classificação do estado físico
     unique_id: elgin_supervisor_v4_classificacao_estado_fisico
     default_entity_id: sensor.elgin_supervisor_classificacao_do_estado_fisico
@@ -1313,6 +1334,9 @@ template:
       {% if not power %}Nenhuma{% elif mode not in ['heat','cool','dry'] %}Não supervisionado{% elif ns.id is none %}Sem perfil habilitado{% else %}{{ ns.name }}{% endif %}
     attributes:
       power: "{{ is_state('switch.smart_air_conditioner_power_ar_condicionado_id_1','on') }}"
+      tratamento: |-
+        {% if not is_state('switch.smart_air_conditioner_power_ar_condicionado_id_1','on') %}Nenhum
+        {% else %}{{ {'Frio':'Refrigeração','Quente':'Aquecimento','Desumidificar':'Desumidificação'}.get(states('select.smart_air_conditioner_mode_ar_condicionado_id_4'),'Não supervisionado') }}{% endif %}
       mode: |-
         {{ {'Frio':'cool','Quente':'heat','Desumidificar':'dry','Ventilar':'fan','Automático':'auto'}.get(states('select.smart_air_conditioner_mode_ar_condicionado_id_4'),'unknown') }}
       fan: |-
@@ -1330,6 +1354,39 @@ template:
           {% set score = fp * 1000 + ((alvo - profile.target_temperature) | abs) * 10 + (profile.level | int(0)) %}
           {% if score < ns.score %}{% set ns.id=profile.id %}{% set ns.score=score %}{% endif %}
         {% endfor %}{{ ns.id }}
+      perfil_fan: |-
+        {% set mode = {'Frio':'cool','Quente':'heat','Desumidificar':'dry'}.get(states('select.smart_air_conditioner_mode_ar_condicionado_id_4'),'unknown') %}
+        {% set fan = {'Baixa':'low','Média':'medium','Alta':'high','Automática':'auto','Silencioso':'quiet'}.get(states('select.smart_air_conditioner_windspeed_ar_condicionado_id_5'),'unknown') %}
+        {% set alvo = (states('number.smart_air_conditioner_temperatura_alvo_ar_condicionado_id_2') | float(240) / 10) | round(1) %}
+        {% set profiles = (state_attr('sensor.elgin_supervisor_potencias','profiles') or {}).get(mode,[]) %}
+        {% set ns = namespace(value='unknown',score=999999) %}
+        {% for profile in profiles if profile.enabled | default(true) %}
+          {% set fp = 0 if fan == profile.fan else 0.25 if fan == 'quiet' and profile.fan == 'low' else 2 if fan == 'auto' else 1 %}
+          {% set score = fp * 1000 + ((alvo - profile.target_temperature) | abs) * 10 + (profile.level | int(0)) %}
+          {% if score < ns.score %}{% set ns.value=profile.fan %}{% set ns.score=score %}{% endif %}
+        {% endfor %}{{ ns.value }}
+      perfil_target_temperature: |-
+        {% set mode = {'Frio':'cool','Quente':'heat','Desumidificar':'dry'}.get(states('select.smart_air_conditioner_mode_ar_condicionado_id_4'),'unknown') %}
+        {% set fan = {'Baixa':'low','Média':'medium','Alta':'high','Automática':'auto','Silencioso':'quiet'}.get(states('select.smart_air_conditioner_windspeed_ar_condicionado_id_5'),'unknown') %}
+        {% set alvo = (states('number.smart_air_conditioner_temperatura_alvo_ar_condicionado_id_2') | float(240) / 10) | round(1) %}
+        {% set profiles = (state_attr('sensor.elgin_supervisor_potencias','profiles') or {}).get(mode,[]) %}
+        {% set ns = namespace(value=none,score=999999) %}
+        {% for profile in profiles if profile.enabled | default(true) %}
+          {% set fp = 0 if fan == profile.fan else 0.25 if fan == 'quiet' and profile.fan == 'low' else 2 if fan == 'auto' else 1 %}
+          {% set score = fp * 1000 + ((alvo - profile.target_temperature) | abs) * 10 + (profile.level | int(0)) %}
+          {% if score < ns.score %}{% set ns.value=profile.target_temperature %}{% set ns.score=score %}{% endif %}
+        {% endfor %}{{ ns.value }}
+      distancia_alvo: |-
+        {% set mode = {'Frio':'cool','Quente':'heat','Desumidificar':'dry'}.get(states('select.smart_air_conditioner_mode_ar_condicionado_id_4'),'unknown') %}
+        {% set fan = {'Baixa':'low','Média':'medium','Alta':'high','Automática':'auto','Silencioso':'quiet'}.get(states('select.smart_air_conditioner_windspeed_ar_condicionado_id_5'),'unknown') %}
+        {% set alvo = (states('number.smart_air_conditioner_temperatura_alvo_ar_condicionado_id_2') | float(240) / 10) | round(1) %}
+        {% set profiles = (state_attr('sensor.elgin_supervisor_potencias','profiles') or {}).get(mode,[]) %}
+        {% set ns = namespace(value=none,score=999999) %}
+        {% for profile in profiles if profile.enabled | default(true) %}
+          {% set fp = 0 if fan == profile.fan else 0.25 if fan == 'quiet' and profile.fan == 'low' else 2 if fan == 'auto' else 1 %}
+          {% set score = fp * 1000 + ((alvo - profile.target_temperature) | abs) * 10 + (profile.level | int(0)) %}
+          {% if score < ns.score %}{% set ns.value=(alvo - profile.target_temperature) | abs %}{% set ns.score=score %}{% endif %}
+        {% endfor %}{{ ns.value }}
       catalog_source: sensor.elgin_supervisor_potencias
   - name: Elgin Supervisor - Estado físico semi-automático
     unique_id: elgin_supervisor_v4_estado_fisico_semiautomatico
@@ -2438,6 +2495,14 @@ script:
               ~ '|tb=' ~ (1 if turbo_final | bool else 0)
               ~ '|sl=' ~ (1 if sleep_final | bool else 0)
               ~ '|h=' ~ (1 if health_final | bool else 0)) | truncate(255, true, '') }}
+        assinatura_localtuya_esperada: |-
+          {{ ('p=' ~ (1 if power | bool else 0)
+              ~ '|m=' ~ (mode | string | trim)
+              ~ '|f=' ~ (fan_final | string | trim)
+              ~ '|t=' ~ (target_temperature | int)
+              ~ '|s=' ~ (swing | string | trim)
+              ~ '|sl=' ~ (1 if sleep_final | bool else 0)
+              ~ '|h=' ~ (1 if health_final | bool else 0)) | truncate(255, true, '') }}
         assinatura_anterior: |-
           {{ states('input_text.elgin_supervisor_assinatura_ultimo_ir') }}
         forcar_envio_final: |-
@@ -2527,6 +2592,12 @@ script:
           {{ assinatura_ir }}
     - action: input_text.set_value
       target:
+        entity_id: input_text.elgin_supervisor_assinatura_localtuya_esperada
+      data:
+        value: |-
+          {{ assinatura_localtuya_esperada }}
+    - action: input_text.set_value
+      target:
         entity_id: input_text.elgin_supervisor_ultimo_envio_ir
       data:
         value: |-
@@ -2546,15 +2617,16 @@ script:
       data:
         value: |-
           {% if power | bool and tratamento in ['Aquecimento','Refrigeração','Desumidificação'] %}
-            {% set d = 'sensor.elgin_supervisor_diagnostico_de_potencia' %}
-            {% set final = states(d) %}
-            {% set base = state_attr(d,'potencia_base') %}
-            {% set nivel_base = state_attr(d,'nivel_base') | int(-1) %}
-            {% set clima = state_attr(d,'ajuste_clima') | int(0) %}
-            {% set preset_ajuste = state_attr(d,'ajuste_preset') | int(0) %}
-            {% set preset = state_attr(d,'preset') %}
-            {% set delta = state_attr(d,'delta_local') %}
-            {% set unidade = state_attr(d,'unidade_delta') %}
+            {% set mode_key = {'Aquecimento':'heat','Refrigeração':'cool','Desumidificação':'dry'}.get(tratamento) %}
+            {% set dados = (state_attr('sensor.elgin_supervisor_potencias','modes') or {}).get(mode_key,{}) %}
+            {% set modificadores = dados.get('modifiers',{}) %}
+            {% set final = dados.get('effective_name','Indisponível') %}
+            {% set base = dados.get('calculation_base_name','Indisponível') %}
+            {% set nivel_base = dados.get('calculation_base_level',-1) | int(-1) %}
+            {% set regras = modificadores.get('rules',0) | int(0) %}
+            {% set clima = modificadores.get('regional',0) | int(0) %}
+            {% set preset_ajuste = modificadores.get('preset',0) | int(0) %}
+            {% set preset = ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get(mode_key,{}) or {}).get('effective_name','Indisponível') %}
             {% set temperatura = states('sensor.sensor_temperatura_sensor_dedicado') | float | round(1) %}
             {% set umidade = states('sensor.sensor_umidade_sensor_dedicado') | float | round(0) | int %}
             {% set temperatura_inicio = states('input_number.elgin_supervisor_temperatura_na_ativacao') | float | round(1) %}
@@ -2563,9 +2635,9 @@ script:
             {% set preset_txt = ('+' ~ preset_ajuste) if preset_ajuste > 0 else preset_ajuste %}
             {% set ifeel_txt = temperatura_atual ~ '°C ' ~ fonte_ifeel
                  if is_state('binary_sensor.elgin_supervisor_ifeel_efetivo','on') else 'off' %}
-            {% set msg = tratamento ~ ': ' ~ target_temperature ~ '°C/' ~ fan_final
+            {% set msg = motivo ~ ' Resultado=' ~ tratamento ~ ': ' ~ target_temperature ~ '°C/' ~ fan_final
                 ~ ', swing=' ~ swing ~ '; potência=' ~ final
-                ~ ' [base=' ~ base ~ '(' ~ nivel_base ~ '), Δlocal=' ~ delta ~ unidade
+                ~ ' [base=' ~ base ~ '(' ~ nivel_base ~ '), regras=' ~ regras
                 ~ ', clima=' ~ clima_txt ~ ', preset=' ~ preset_txt ~ ' ' ~ preset ~ ']'
                 ~ '; atual T=' ~ temperatura ~ '°C/H=' ~ umidade ~ '%'
                 ~ '; ativação T=' ~ temperatura_inicio ~ '°C/H=' ~ umidade_inicio ~ '%'
@@ -2778,6 +2850,10 @@ script:
           {{ is_state('binary_sensor.elgin_supervisor_fisico_semiautomatico_efetivo','on') }}
         tratamento_fisico: |-
           {{ states('input_select.elgin_supervisor_tratamento_fisico_classificado') }}
+        potencia_fisica_atual: |-
+          {{ states('sensor.elgin_supervisor_classificacao_do_estado_fisico') }}
+        potencia_desejada: |-
+          {{ state_attr('sensor.elgin_supervisor_configuracao_desejada','potencia') | default('Nenhuma', true) }}
         ifeel_desejado: |
           {{ is_state('binary_sensor.elgin_supervisor_ifeel_efetivo','on') }}
         turbo_desejado: |
@@ -3184,7 +3260,7 @@ script:
               target_temperature: |-
                 {{ alvo_desejado }}
               motivo: |-
-                Aplicado {{ desejado }}: mode={{ mode_desejado }},
+                Aplicado {{ desejado }}: potência física={{ potencia_fisica_atual }} → desejada={{ potencia_desejada }}, mode={{ mode_desejado }},
                 alvo={{ alvo_desejado }}°C, fan={{ fan_desejado }},
                 swing={{ swing_desejado }}.
           else:
@@ -3281,7 +3357,9 @@ script:
         - input_boolean.elgin_supervisor_estado_fisico_adotado
     - action: input_text.set_value
       target:
-        entity_id: input_text.elgin_supervisor_assinatura_ultimo_ir
+        entity_id:
+        - input_text.elgin_supervisor_assinatura_ultimo_ir
+        - input_text.elgin_supervisor_assinatura_localtuya_esperada
       data:
         value: ''
     - action: input_select.select_option
@@ -3563,7 +3641,9 @@ automation:
   - delay: 00:00:05
   - action: input_text.set_value
     target:
-      entity_id: input_text.elgin_supervisor_assinatura_ultimo_ir
+      entity_id:
+      - input_text.elgin_supervisor_assinatura_ultimo_ir
+      - input_text.elgin_supervisor_assinatura_localtuya_esperada
     data:
       value: ''
   - if:
@@ -4032,52 +4112,13 @@ automation:
       value_template: >-
         {{ state_attr('sensor.elgin_supervisor_agenda_politica','global_action') | default('normal', true) != 'disable_supervisor'
         }}
-    - condition: state
-      entity_id: timer.elgin_supervisor_janela_reconciliacao
-      state: idle
     then:
     - action: input_text.set_value
       target:
-        entity_id: input_text.elgin_supervisor_assinatura_ultimo_ir
+        entity_id: input_text.elgin_supervisor_ultima_classificacao_fisica
       data:
-        value: ''
-    - choose:
-      - conditions:
-        - condition: state
-          entity_id: binary_sensor.elgin_supervisor_fisico_semiautomatico_efetivo
-          state: 'on'
-        sequence:
-        - action: input_text.set_value
-          target:
-            entity_id: input_text.elgin_supervisor_ultima_classificacao_fisica
-          data:
-            value: |-
-              {{ ('Mudança detectada em ' ~ trigger.entity_id ~ '; aguardando a sincronização passiva consolidar o estado LocalTuya.') | truncate(255, true, '') }}
-      - conditions:
-        - condition: state
-          entity_id: binary_sensor.elgin_supervisor_respeitar_controle_manual_efetivo
-          state: 'on'
-        sequence:
-        - action: timer.start
-          target:
-            entity_id: timer.elgin_supervisor_pausa_manual
-          data:
-            duration: |-
-              {% set m = state_attr('sensor.elgin_supervisor_tempos_efetivos','pausa_manual') | int(30) %}
-              {{ '%02d:%02d:00' | format(m // 60, m % 60) }}
-        - action: input_select.select_option
-          target:
-            entity_id: input_select.elgin_supervisor_tratamento_ativo
-          data:
-            option: Manual
-        - action: input_text.set_value
-          target:
-            entity_id: input_text.elgin_supervisor_ultima_decisao
-          data:
-            value: |-
-              Alteração física detectada em {{ trigger.entity_id }}. Automação pausada para respeitar o controle manual.
-      default:
-      - action: script.elgin_supervisor_aplicar_decisao
+        value: |-
+          {{ ('Mudança detectada em ' ~ trigger.entity_id ~ '; aguardando a sincronização passiva consolidar os DPs e comparar a origem.') | truncate(255, true, '') }}
   mode: restart
   description: Registra mudanças LocalTuya. Power OFF é tratado separadamente pela automação prioritária; demais 
     mudanças seguem a classificação após a sincronização passiva.
@@ -4120,8 +4161,10 @@ automation:
   mode: single
 - id: elgin_supervisor_v4_classificar_apos_sincronizacao_localtuya
   alias: Elgin Supervisor - Classificar após sincronização LocalTuya
-  description: Após a importação passiva, trata Power OFF com prioridade absoluta. Demais estados são classificados 
-    somente fora da reconciliação.
+  description: >-
+    Após a importação passiva, trata Power OFF com prioridade absoluta e compara
+    o estado consolidado com o último IR observável. Confirmações encerram a
+    reconciliação sem comando; divergências externas seguem a política física.
   triggers:
   - trigger: state
     entity_id: input_boolean.elgin_aux_sincronizacao_passiva_em_andamento
@@ -4136,6 +4179,18 @@ automation:
       {{ state_attr('sensor.elgin_supervisor_agenda_politica','global_action') | default('normal', true) != 'disable_supervisor'
       }}
   actions:
+  - variables:
+      assinatura_observada: |-
+        {{ state_attr('sensor.elgin_supervisor_estado_fisico_observado','assinatura') | default('', true) }}
+      assinatura_esperada: |-
+        {{ states('input_text.elgin_supervisor_assinatura_localtuya_esperada') }}
+      segundos_desde_ultimo_ir: |-
+        {{ as_timestamp(now()) - as_timestamp(states('input_datetime.elgin_supervisor_ultimo_comando'), 0) }}
+      confirmacao_ultimo_ir: |-
+        {{ assinatura_esperada not in ['', 'unknown', 'unavailable', 'none']
+           and assinatura_observada not in ['', 'unknown', 'unavailable', 'none']
+           and assinatura_observada == assinatura_esperada
+           and segundos_desde_ultimo_ir | float(9999) <= 60 }}
   - choose:
     - conditions:
       - condition: state
@@ -4146,22 +4201,80 @@ automation:
         data:
           origem: fim da sincronização passiva LocalTuya
     - conditions:
+      - condition: template
+        value_template: |-
+          {{ confirmacao_ultimo_ir | bool }}
+      sequence:
+      - action: timer.cancel
+        target:
+          entity_id: timer.elgin_supervisor_janela_reconciliacao
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.elgin_supervisor_ultima_classificacao_fisica
+        data:
+          value: |-
+            {{ ('LocalTuya confirmou o último IR completo; reconciliação encerrada sem novo comando. Assinatura=' ~ assinatura_observada ~ '.') | truncate(255, true, '') }}
+    - conditions:
       - condition: state
         entity_id: binary_sensor.elgin_supervisor_fisico_semiautomatico_efetivo
         state: 'on'
-      - condition: state
-        entity_id: timer.elgin_supervisor_janela_reconciliacao
-        state: idle
       sequence:
+      - action: timer.cancel
+        target:
+          entity_id: timer.elgin_supervisor_janela_reconciliacao
+      - action: input_text.set_value
+        target:
+          entity_id:
+          - input_text.elgin_supervisor_assinatura_ultimo_ir
+          - input_text.elgin_supervisor_assinatura_localtuya_esperada
+        data:
+          value: ''
       - delay: 00:00:01
       - action: script.elgin_supervisor_adotar_estado_fisico
+    - conditions:
+      - condition: state
+        entity_id: binary_sensor.elgin_supervisor_respeitar_controle_manual_efetivo
+        state: 'on'
+      sequence:
+      - action: timer.cancel
+        target:
+          entity_id: timer.elgin_supervisor_janela_reconciliacao
+      - action: input_text.set_value
+        target:
+          entity_id:
+          - input_text.elgin_supervisor_assinatura_ultimo_ir
+          - input_text.elgin_supervisor_assinatura_localtuya_esperada
+        data:
+          value: ''
+      - action: timer.start
+        target:
+          entity_id: timer.elgin_supervisor_pausa_manual
+        data:
+          duration: |-
+            {% set m = state_attr('sensor.elgin_supervisor_tempos_efetivos','pausa_manual') | int(30) %}
+            {{ '%02d:%02d:00' | format(m // 60, m % 60) }}
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.elgin_supervisor_tratamento_ativo
+        data:
+          option: Manual
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.elgin_supervisor_ultima_decisao
+        data:
+          value: Alteração física consolidada; automação pausada para respeitar o controle manual.
     default:
+    - action: timer.cancel
+      target:
+        entity_id: timer.elgin_supervisor_janela_reconciliacao
     - action: input_text.set_value
       target:
-        entity_id: input_text.elgin_supervisor_ultima_classificacao_fisica
+        entity_id:
+        - input_text.elgin_supervisor_assinatura_ultimo_ir
+        - input_text.elgin_supervisor_assinatura_localtuya_esperada
       data:
-        value: 'Sincronização concluída durante reconciliação: confirmação mantida sem reclassificação. Power OFF continuaria
-          sendo prioritário.'
+        value: ''
+    - action: script.elgin_supervisor_aplicar_decisao
   mode: restart
 - id: elgin_supervisor_v4_finalizar_classificacao_fisica
   alias: Elgin Supervisor - Finalizar classificação física
