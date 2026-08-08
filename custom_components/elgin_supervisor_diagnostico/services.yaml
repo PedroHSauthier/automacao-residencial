@@ -1,0 +1,87 @@
+register_observation:
+  name: Registrar observação
+  description: Registra uma observação humana sem executar ações climáticas ou ESPHome.
+  fields:
+    observation_type:
+      name: Tipo
+      required: true
+      default: note
+      selector:
+        select:
+          options:
+            - label: Observação
+              value: note
+            - label: Bip
+              value: beep
+    title:
+      name: Título
+      required: true
+      selector:
+        text:
+    text:
+      name: Texto
+      required: true
+      selector:
+        text:
+          multiline: true
+    tags:
+      name: Tags
+      description: Marcadores livres usados na busca e na correlação.
+      selector:
+        text:
+          multiple: true
+    beep_count:
+      name: Quantidade de bips
+      selector:
+        select:
+          options:
+            - label: 1 bip
+              value: one
+            - label: 2 bips
+              value: two
+            - label: Vários
+              value: multiple
+            - label: Incerto
+              value: uncertain
+    occurred_at:
+      name: Horário observado
+      selector:
+        datetime:
+
+register_beep:
+  name: Registrar bip agora
+  description: Atalho para registrar um ou mais bips observados pelo usuário.
+  fields:
+    beep_count:
+      name: Quantidade
+      required: true
+      default: uncertain
+      selector:
+        select:
+          options:
+            - label: 1 bip
+              value: one
+            - label: 2 bips
+              value: two
+            - label: Vários
+              value: multiple
+            - label: Incerto
+              value: uncertain
+    text:
+      name: Observação
+      selector:
+        text:
+          multiline: true
+    tags:
+      name: Tags
+      selector:
+        text:
+          multiple: true
+    occurred_at:
+      name: Horário observado
+      selector:
+        datetime:
+
+reevaluate_anomalies:
+  name: Reavaliar anomalias
+  description: Reexecuta verificações diagnósticas sobre os dados disponíveis.

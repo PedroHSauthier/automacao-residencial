@@ -1,0 +1,13 @@
+{
+  "domain": "elgin_supervisor_diagnostico",
+  "name": "Elgin Supervisor — Diagnóstico",
+  "version": "1.0.0",
+  "config_flow": true,
+  "dependencies": ["http", "lovelace", "websocket_api"],
+  "after_dependencies": ["elgin_supervisor_agenda", "esphome", "localtuya"],
+  "codeowners": [],
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "single_config_entry": true,
+  "requirements": []
+}

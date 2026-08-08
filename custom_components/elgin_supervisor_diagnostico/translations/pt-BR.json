@@ -1,0 +1,202 @@
+{
+  "title": "Elgin Supervisor — Diagnóstico",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurar o diagnóstico do Supervisor",
+        "description": "Cria uma única instância local e observacional. Ela não controla o ar-condicionado nem o ESPHome."
+      }
+    },
+    "abort": {
+      "already_configured": "O diagnóstico do Supervisor já está configurado.",
+      "single_instance_allowed": "Somente uma instância do diagnóstico do Supervisor é permitida."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configurações do diagnóstico",
+        "description": "O card é o editor principal. Este editor nativo permanece disponível como contingência.",
+        "menu_options": {
+          "capture": "Captura",
+          "retention": "Retenção",
+          "compaction": "Compactação e volume",
+          "correlation": "Correlação",
+          "anomalies": "Anomalias",
+          "notifications": "Notificações",
+          "interface": "Interface",
+          "privacy": "Privacidade",
+          "maintenance": "Manutenção",
+          "reset_defaults": "Restaurar padrões"
+        }
+      },
+      "capture": {
+        "title": "Captura",
+        "data": {
+          "capture_mode": "Modo de captura",
+          "capture_decisions": "Decisões",
+          "capture_state_changes": "Mudanças de estado",
+          "capture_service_calls": "Chamadas de serviço/ação",
+          "capture_localtuya": "LocalTuya",
+          "capture_climate": "Climate",
+          "capture_agenda": "Agenda",
+          "capture_presets": "Presets",
+          "capture_power_profiles": "Potências",
+          "capture_protections": "Proteções",
+          "capture_errors": "Erros",
+          "capture_external_changes": "Alterações externas"
+        }
+      },
+      "retention": {
+        "title": "Retenção",
+        "data": {
+          "retention_essential_days": "Eventos essenciais (dias)",
+          "retention_error_days": "Erros detalhados (dias)",
+          "retention_trace_days": "Trace completo (dias)"
+        }
+      },
+      "compaction": {
+        "title": "Compactação e proteção contra excesso de eventos",
+        "data": {
+          "compaction_enabled": "Ativar compactação",
+          "compact_identical_evaluations": "Avaliações idênticas",
+          "compact_no_change": "Avaliações sem mudança",
+          "compact_identical_states": "Estados idênticos",
+          "compact_repeated_blocks": "Bloqueios repetidos",
+          "compact_repeated_unavailable": "Indisponibilidades repetidas",
+          "compaction_window_seconds": "Janela de compactação (segundos)",
+          "rate_window_seconds": "Janela de taxa (segundos)",
+          "rate_warning_events": "Limite de aviso de taxa",
+          "rate_hard_limit_events": "Limite da proteção de volume"
+        }
+      },
+      "correlation": {
+        "title": "Correlação",
+        "data": {
+          "correlation_window_seconds": "Janela temporal padrão (segundos)",
+          "localtuya_confirmation_window_seconds": "Confirmação LocalTuya (segundos)",
+          "external_observation_window_seconds": "Observação externa (segundos)",
+          "beep_window_before_seconds": "Tempo antes do bip (segundos)",
+          "beep_window_after_seconds": "Tempo depois do bip (segundos)"
+        }
+      },
+      "anomalies": {
+        "title": "Anomalias",
+        "data": {
+          "anomalies_enabled": "Habilitar detecção de anomalias",
+          "anomaly_enabled_types": "Tipos de anomalia ativos",
+          "anomaly_close_commands_seconds": "Comandos muito próximos (segundos)",
+          "anomaly_repeated_command_window_seconds": "Janela de comando repetido (segundos)",
+          "anomaly_oscillation_window_seconds": "Janela de oscilação (segundos)",
+          "anomaly_oscillation_min_changes": "Mudanças mínimas para oscilação",
+          "anomaly_divergence_seconds": "Divergência do estado desejado (segundos)",
+          "anomaly_volume_window_seconds": "Janela de volume excessivo (segundos)",
+          "anomaly_volume_event_limit": "Limite de eventos no volume excessivo",
+          "anomaly_repeated_error_window_seconds": "Janela de erro repetido (segundos)",
+          "anomaly_repeated_error_count": "Quantidade para erro repetido",
+          "anomaly_unavailable_seconds": "Indisponibilidade crítica (segundos)"
+        }
+      },
+      "notifications": {
+        "title": "Notificações",
+        "data": {
+          "notifications_enabled": "Ativar notificações",
+          "notification_min_severity": "Severidade mínima",
+          "notification_types": "Tipos de anomalia",
+          "notification_cooldown_seconds": "Intervalo mínimo (segundos)",
+          "notification_persistent": "Notificação persistente",
+          "notification_service": "Serviço notify opcional"
+        }
+      },
+      "interface": {
+        "title": "Interface",
+        "data": {
+          "interface_items_per_page": "Itens por página",
+          "interface_auto_refresh": "Avisar automaticamente sobre novos eventos",
+          "interface_columns": "Colunas visíveis",
+          "interface_density": "Densidade",
+          "interface_show_technical_codes": "Mostrar códigos técnicos",
+          "interface_show_unchanged_attributes": "Mostrar atributos não alterados",
+          "interface_date_format": "Formato da data",
+          "interface_detail_mode": "Modo de detalhe do evento"
+        }
+      },
+      "privacy": {
+        "title": "Privacidade",
+        "data": {
+          "privacy_resolve_user_names": "Resolver nomes de usuários do Home Assistant",
+          "privacy_store_user_ids": "Armazenar IDs de usuários",
+          "privacy_store_user_names": "Armazenar nomes de usuários",
+          "privacy_capture_raw_events": "Armazenar eventos brutos sanitizados",
+          "privacy_capture_service_data": "Armazenar dados de serviço sanitizados",
+          "privacy_redact_sensitive_values": "Remover valores sensíveis"
+        }
+      },
+      "maintenance": {
+        "title": "Manutenção",
+        "data": {
+          "maintenance_database_limit_mb": "Limite do banco (MB)",
+          "maintenance_cleanup_interval_hours": "Intervalo de limpeza (horas)",
+          "maintenance_export_max_rows": "Máximo de linhas por exportação",
+          "queue_limit": "Limite da fila normal",
+          "critical_queue_limit": "Limite da fila crítica",
+          "batch_size": "Tamanho do lote de escrita",
+          "flush_interval_seconds": "Intervalo de gravação (segundos)",
+          "anonymize_entity_ids": "Anonimizar IDs de entidades nas exportações"
+        }
+      },
+      "reset_defaults": {
+        "title": "Restaurar padrões",
+        "description": "Isto substitui todas as opções do diagnóstico. Os eventos armazenados não serão excluídos.",
+        "data": {
+          "confirm": "Entendo e quero restaurar todos os padrões"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": {"name": "Status"},
+      "last_event": {"name": "Último evento"},
+      "last_action": {"name": "Última ação"},
+      "events_24h": {"name": "Eventos em 24 horas"},
+      "database_size": {"name": "Tamanho do banco"},
+      "event_rate": {"name": "Taxa de eventos"}
+    },
+    "binary_sensor": {
+      "healthy": {"name": "Saudável"},
+      "persistence_healthy": {"name": "Persistência saudável"},
+      "instrumentation_complete": {"name": "Instrumentação completa"},
+      "storm_protection": {"name": "Proteção de volume de eventos"}
+    },
+    "button": {
+      "register_beep": {"name": "Registrar bip"},
+      "register_observation": {"name": "Registrar observação"},
+      "reevaluate_anomalies": {"name": "Reavaliar anomalias"}
+    },
+    "event": {
+      "important_event": {"name": "Evento importante"}
+    }
+  },
+  "system_health": {
+    "info": {
+      "configured": "Configurado",
+      "loaded": "Carregado",
+      "status": "Estado de execução",
+      "persistence_healthy": "Persistência saudável",
+      "instrumentation_complete": "Instrumentação completa",
+      "schema_version": "Versão do schema do banco",
+      "queue_size": "Gravações pendentes no banco",
+      "dropped_events": "Eventos descartados",
+      "storm_protection_active": "Proteção de volume ativa"
+    }
+  },
+  "issues": {
+    "database_unavailable": {"title": "Banco do diagnóstico indisponível", "description": "O SQLite dedicado não pôde ser aberto. O controle climático permanece independente."},
+    "migration_failed": {"title": "Migração do banco de diagnóstico falhou", "description": "O banco anterior foi preservado, mas sua migração não pôde ser concluída."},
+    "frontend_not_registered": {"title": "Recurso do card de diagnóstico indisponível", "description": "O recurso do card não pôde ser registrado automaticamente."},
+    "instrumentation_incomplete": {"title": "Instrumentação do Supervisor incompleta", "description": "Uma ou mais entidades ou eventos diagnósticos esperados no Home Assistant não foram encontrados."},
+    "storage_degraded": {"title": "Persistência do diagnóstico degradada", "description": "Alguns registros diagnósticos não puderam ser persistidos. O controle climático permanece independente."},
+    "event_volume_excessive": {"title": "Volume excessivo de eventos diagnósticos", "description": "A proteção de volume foi ativada para impedir que o diagnóstico prejudique o Home Assistant."}
+  }
+}

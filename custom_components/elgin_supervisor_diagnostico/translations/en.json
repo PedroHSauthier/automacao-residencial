@@ -1,0 +1,88 @@
+{
+  "title": "Elgin Supervisor — Diagnostics",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Supervisor diagnostics",
+        "description": "Creates one local, observational instance. It does not control the air conditioner or ESPHome."
+      }
+    },
+    "abort": {
+      "already_configured": "Supervisor diagnostics is already configured.",
+      "single_instance_allowed": "Only one Supervisor diagnostics instance is allowed."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Diagnostic settings",
+        "description": "The card is the primary editor. This native editor is available as a fallback.",
+        "menu_options": {
+          "capture": "Capture",
+          "retention": "Retention",
+          "compaction": "Compaction and volume",
+          "correlation": "Correlation",
+          "anomalies": "Anomalies",
+          "notifications": "Notifications",
+          "interface": "Interface",
+          "privacy": "Privacy",
+          "maintenance": "Maintenance",
+          "reset_defaults": "Restore defaults"
+        }
+      },
+      "capture": {
+        "title": "Capture",
+        "data": {
+          "capture_mode": "Capture mode",
+          "capture_decisions": "Decisions",
+          "capture_state_changes": "State changes",
+          "capture_service_calls": "Service/action calls",
+          "capture_localtuya": "LocalTuya",
+          "capture_climate": "Climate",
+          "capture_agenda": "Schedule",
+          "capture_presets": "Presets",
+          "capture_power_profiles": "Power profiles",
+          "capture_protections": "Protections",
+          "capture_errors": "Errors",
+          "capture_external_changes": "External changes"
+        }
+      },
+      "retention": {"title": "Retention", "data": {"retention_essential_days": "Essential events (days)", "retention_error_days": "Detailed errors (days)", "retention_trace_days": "Full trace (days)"}},
+      "compaction": {"title": "Compaction and event-storm protection", "data": {"compaction_enabled": "Enable compaction", "compact_identical_evaluations": "Identical evaluations", "compact_no_change": "No-change evaluations", "compact_identical_states": "Identical states", "compact_repeated_blocks": "Repeated blocks", "compact_repeated_unavailable": "Repeated unavailability", "compaction_window_seconds": "Compaction window (seconds)", "rate_window_seconds": "Rate window (seconds)", "rate_warning_events": "Rate warning threshold", "rate_hard_limit_events": "Rate protection threshold"}},
+      "correlation": {"title": "Correlation", "data": {"correlation_window_seconds": "Default temporal window (seconds)", "localtuya_confirmation_window_seconds": "LocalTuya confirmation window (seconds)", "external_observation_window_seconds": "External-change window (seconds)", "beep_window_before_seconds": "Time before a beep (seconds)", "beep_window_after_seconds": "Time after a beep (seconds)"}},
+      "anomalies": {"title": "Anomalies", "data": {"anomalies_enabled": "Enable anomaly detection", "anomaly_enabled_types": "Enabled anomaly types", "anomaly_close_commands_seconds": "Commands too close (seconds)", "anomaly_repeated_command_window_seconds": "Repeated-command window (seconds)", "anomaly_oscillation_window_seconds": "Oscillation window (seconds)", "anomaly_oscillation_min_changes": "Minimum oscillation changes", "anomaly_divergence_seconds": "Desired-state divergence (seconds)", "anomaly_volume_window_seconds": "Excessive-volume window (seconds)", "anomaly_volume_event_limit": "Excessive-volume event limit", "anomaly_repeated_error_window_seconds": "Repeated-error window (seconds)", "anomaly_repeated_error_count": "Repeated-error count", "anomaly_unavailable_seconds": "Critical unavailability (seconds)"}},
+      "notifications": {"title": "Notifications", "data": {"notifications_enabled": "Enable notifications", "notification_min_severity": "Minimum severity", "notification_types": "Anomaly types", "notification_cooldown_seconds": "Cooldown (seconds)", "notification_persistent": "Persistent notifications", "notification_service": "Optional notify service"}},
+      "interface": {"title": "Interface", "data": {"interface_items_per_page": "Items per page", "interface_auto_refresh": "Automatic update notification", "interface_columns": "Visible columns", "interface_density": "Density", "interface_show_technical_codes": "Show technical codes", "interface_show_unchanged_attributes": "Show unchanged attributes", "interface_date_format": "Date format", "interface_detail_mode": "Event detail mode"}},
+      "privacy": {"title": "Privacy", "data": {"privacy_resolve_user_names": "Resolve Home Assistant user names", "privacy_store_user_ids": "Store user IDs", "privacy_store_user_names": "Store user names", "privacy_capture_raw_events": "Store sanitized raw events", "privacy_capture_service_data": "Store sanitized service data", "privacy_redact_sensitive_values": "Redact sensitive values"}},
+      "maintenance": {"title": "Maintenance", "data": {"maintenance_database_limit_mb": "Database limit (MB)", "maintenance_cleanup_interval_hours": "Cleanup interval (hours)", "maintenance_export_max_rows": "Maximum rows per export", "queue_limit": "Normal queue limit", "critical_queue_limit": "Critical queue limit", "batch_size": "Writer batch size", "flush_interval_seconds": "Writer flush interval (seconds)", "anonymize_entity_ids": "Anonymize entity IDs in exports"}},
+      "reset_defaults": {"title": "Restore defaults", "description": "This replaces every diagnostic option. Stored events are not deleted.", "data": {"confirm": "I understand and want to restore all defaults"}}
+    }
+  },
+  "entity": {
+    "sensor": {"status": {"name": "Status"}, "last_event": {"name": "Last event"}, "last_action": {"name": "Last action"}, "events_24h": {"name": "Events in 24 hours"}, "database_size": {"name": "Database size"}, "event_rate": {"name": "Event rate"}},
+    "binary_sensor": {"healthy": {"name": "Healthy"}, "persistence_healthy": {"name": "Persistence healthy"}, "instrumentation_complete": {"name": "Instrumentation complete"}, "storm_protection": {"name": "Event-volume protection"}},
+    "button": {"register_beep": {"name": "Register beep"}, "register_observation": {"name": "Register observation"}, "reevaluate_anomalies": {"name": "Re-evaluate anomalies"}},
+    "event": {"important_event": {"name": "Important event"}}
+  },
+  "system_health": {
+    "info": {
+      "configured": "Configured",
+      "loaded": "Loaded",
+      "status": "Runtime status",
+      "persistence_healthy": "Persistence healthy",
+      "instrumentation_complete": "Instrumentation complete",
+      "schema_version": "Database schema version",
+      "queue_size": "Pending database writes",
+      "dropped_events": "Dropped events",
+      "storm_protection_active": "Event-volume protection active"
+    }
+  },
+  "issues": {
+    "database_unavailable": {"title": "Diagnostic database unavailable", "description": "The dedicated SQLite database could not be opened. HVAC control remains independent."},
+    "migration_failed": {"title": "Diagnostic database migration failed", "description": "The legacy database was preserved, but its migration could not be completed."},
+    "frontend_not_registered": {"title": "Diagnostic card resource unavailable", "description": "The card resource could not be registered automatically."},
+    "instrumentation_incomplete": {"title": "Supervisor instrumentation incomplete", "description": "One or more expected Home Assistant entities or diagnostic events are missing."},
+    "storage_degraded": {"title": "Diagnostic persistence degraded", "description": "Some diagnostic records could not be persisted. HVAC control remains independent."},
+    "event_volume_excessive": {"title": "Excessive diagnostic event volume", "description": "Volume protection was activated to prevent diagnostic data from affecting Home Assistant."}
+  }
+}

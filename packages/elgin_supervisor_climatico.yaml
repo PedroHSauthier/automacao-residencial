@@ -2507,11 +2507,24 @@ script:
           {{ states('input_text.elgin_supervisor_assinatura_ultimo_ir') }}
         forcar_envio_final: |-
           {{ forcar_envio | default(false, true) | bool }}
+        diagnostico_evaluation_id: |-
+          {{ state_attr('sensor.elgin_supervisor_configuracao_desejada','evaluation_id')
+             | default(state_attr('sensor.elgin_supervisor_potencias','evaluation_id'), true)
+             | default('supervisor-' ~ now().strftime('%Y%m%dT%H%M%S%f'), true) }}
     - if:
       - condition: template
         value_template: |-
           {{ not (temperatura_ifeel_valida | bool) }}
       then:
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: error
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          function: full_state
+          treatment: "{{ tratamento }}"
+          mode: "{{ mode }}"
+          reason: Fonte iFeel indisponível; transmissão cancelada antes da action ESPHome.
+          audibility: no_transmission
       - stop: >
           A fonte selecionada do iFeel está indisponível; transmissão cancelada.
         error: true
@@ -2529,6 +2542,21 @@ script:
           value: |-
             {{ ('IR idêntico suprimido: ' ~ assinatura_ir ~ '. Motivo solicitado: ' ~ motivo)
                | truncate(255, true, '') }}
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: transmission_suppressed
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          function: full_state
+          treatment: "{{ tratamento }}"
+          mode: "{{ mode }}"
+          power: "{{ power | bool }}"
+          reason: "{{ motivo }}"
+          audibility: no_transmission
+          desired:
+            signature: "{{ assinatura_ir }}"
+            fan: "{{ fan_final }}"
+            target_temperature: "{{ target_temperature | int }}"
+            swing: "{{ swing }}"
       - stop: A mesma configuração completa já foi transmitida; reenvio bloqueado.
     - if:
       - condition: template
@@ -2558,6 +2586,27 @@ script:
         entity_id: timer.elgin_supervisor_janela_reconciliacao
       data:
         duration: 00:00:30
+    - event: elgin_supervisor_diagnostic_event
+      event_data:
+        stage: transmission_requested
+        evaluation_id: "{{ diagnostico_evaluation_id }}"
+        function: full_state
+        treatment: "{{ tratamento }}"
+        mode: "{{ mode }}"
+        power: "{{ power | bool }}"
+        reason: "{{ motivo }}"
+        audibility: audible_expected
+        desired:
+          signature: "{{ assinatura_ir }}"
+          localtuya_signature: "{{ assinatura_localtuya_esperada }}"
+          fan: "{{ fan_final }}"
+          target_temperature: "{{ target_temperature | int }}"
+          current_temperature: "{{ temperatura_atual }}"
+          ifeel: "{{ is_state('binary_sensor.elgin_supervisor_ifeel_efetivo','on') }}"
+          swing: "{{ swing }}"
+          turbo: "{{ turbo_final | bool }}"
+          sleep: "{{ sleep_final | bool }}"
+          health: "{{ health_final | bool }}"
     - action: esphome.esp8266_elgin_send_state
       data:
         power: |-
@@ -2584,6 +2633,20 @@ script:
           {{ health_final | bool }}
         command: |-
           {{ 'temperature_up' if power | bool else 'power' }}
+    - event: elgin_supervisor_diagnostic_event
+      event_data:
+        stage: transmission_accepted_by_software
+        evaluation_id: "{{ diagnostico_evaluation_id }}"
+        function: full_state
+        treatment: "{{ tratamento }}"
+        mode: "{{ mode }}"
+        power: "{{ power | bool }}"
+        reason: >-
+          A action ESPHome retornou sem erro ao Home Assistant; isso não confirma
+          emissão física nem recepção pelo aparelho.
+        audibility: audible_expected
+        desired:
+          signature: "{{ assinatura_ir }}"
     - action: input_text.set_value
       target:
         entity_id: input_text.elgin_supervisor_assinatura_ultimo_ir
@@ -2687,23 +2750,53 @@ script:
           {{ states('input_text.elgin_supervisor_assinatura_ultimo_ir') }}
         segundos_desde_ultimo_ir: |-
           {{ as_timestamp(now()) - as_timestamp(states('input_datetime.elgin_supervisor_ultimo_comando'), 0) }}
+        diagnostico_evaluation_id: |-
+          {{ state_attr('sensor.elgin_supervisor_configuracao_desejada','evaluation_id')
+             | default(state_attr('sensor.elgin_supervisor_potencias','evaluation_id'), true)
+             | default('eco-' ~ now().strftime('%Y%m%dT%H%M%S%f'), true) }}
     - if:
       - condition: template
         value_template: |-
           {{ eco_desejado == 'ignore' }}
       then:
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: evaluation_no_change
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          function: eco
+          mode: "{{ modo_localtuya }}"
+          reason: Eco configurado para seguir controle externo; Supervisor não atuou.
+          audibility: no_transmission
       - stop: Eco segue controle externo; o Supervisor não interfere.
     - if:
       - condition: state
         entity_id: switch.smart_air_conditioner_power_ar_condicionado_id_1
         state: 'off'
       then:
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: decision_blocked
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          function: eco
+          mode: "{{ modo_localtuya }}"
+          protection: eco_power_off
+          reason: Aparelho desligado; Eco não foi comandado.
+          audibility: no_transmission
       - stop: Aparelho desligado; Eco não será comandado.
     - if:
       - condition: template
         value_template: |-
           {{ modo_localtuya != 'cool' }}
       then:
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: decision_blocked
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          function: eco
+          mode: "{{ modo_localtuya }}"
+          protection: eco_only_in_cool
+          reason: Modo físico confirmado não é refrigeração; Eco protegido.
+          audibility: no_transmission
       - stop: >
           Eco protegido: o modo físico confirmado não é refrigeração.
           Nenhum comando LocalTuya foi emitido.
@@ -2714,6 +2807,15 @@ script:
              and assinatura_ultimo_ir not in ['', 'unknown', 'unavailable', 'none']
              and '|m=cool|' not in assinatura_ultimo_ir }}
       then:
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: decision_blocked
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          function: eco
+          mode: "{{ modo_localtuya }}"
+          protection: eco_transient_mode_guard
+          reason: Último IR recente pediu outro modo; estado Frio do LocalTuya ainda pode ser transitório.
+          audibility: no_transmission
       - stop: >
           Eco protegido: o último IR completo recente solicitou outro modo,
           embora o LocalTuya ainda apresente Frio de forma transitória.
@@ -2722,12 +2824,29 @@ script:
         value_template: |-
           {{ not is_state('timer.elgin_supervisor_bloqueio_comando_eco','idle') }}
       then:
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: transmission_suppressed
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          function: eco
+          mode: "{{ modo_localtuya }}"
+          protection: eco_duplicate_guard
+          reason: Comando Eco recente; tentativa duplicada suprimida.
+          audibility: no_transmission
       - stop: Comando Eco recente; tentativa duplicada suprimida.
     - if:
       - condition: template
         value_template: |-
           {{ states('switch.smart_air_conditioner_eco_ar_condicionado_id_8') in ['unknown','unavailable'] }}
       then:
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: error
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          function: eco
+          mode: "{{ modo_localtuya }}"
+          reason: Entidade Eco LocalTuya indisponível; nenhuma solicitação emitida.
+          audibility: no_transmission
       - stop: Entidade Eco LocalTuya indisponível.
     - choose:
       - conditions:
@@ -2740,6 +2859,16 @@ script:
             entity_id: timer.elgin_supervisor_bloqueio_comando_eco
           data:
             duration: 00:00:05
+        - event: elgin_supervisor_diagnostic_event
+          event_data:
+            stage: eco_requested
+            evaluation_id: "{{ diagnostico_evaluation_id }}"
+            function: eco
+            mode: cool
+            reason: "{{ motivo | default('Reconciliação Eco', true) }}"
+            audibility: audible_expected
+            desired:
+              eco: "on"
         - action: switch.turn_on
           continue_on_error: true
           target:
@@ -2754,6 +2883,16 @@ script:
             entity_id: timer.elgin_supervisor_bloqueio_comando_eco
           data:
             duration: 00:00:05
+        - event: elgin_supervisor_diagnostic_event
+          event_data:
+            stage: eco_requested
+            evaluation_id: "{{ diagnostico_evaluation_id }}"
+            function: eco
+            mode: cool
+            reason: "{{ motivo | default('Reconciliação Eco', true) }}"
+            audibility: audible_expected
+            desired:
+              eco: "off"
         - action: switch.turn_off
           continue_on_error: true
           target:
@@ -2874,6 +3013,10 @@ script:
               ~ '|h=' ~ (1 if health_desejado | bool else 0)) | truncate(255, true, '') }}
         assinatura_anterior: |
           {{ states('input_text.elgin_supervisor_assinatura_ultimo_ir') }}
+        diagnostico_evaluation_id: |-
+          {{ state_attr('sensor.elgin_supervisor_configuracao_desejada','evaluation_id')
+             | default(state_attr('sensor.elgin_supervisor_potencias','evaluation_id'), true)
+             | default('supervisor-' ~ now().strftime('%Y%m%dT%H%M%S%f'), true) }}
         diferenca: |
           {{ not power_atual
              or mode_atual != mode_desejado
@@ -2884,6 +3027,89 @@ script:
              or assinatura_anterior != assinatura_desejada
              or is_state('input_boolean.elgin_aux_alteracoes_avancadas_pendentes','on')
              or (not is_state('binary_sensor.esp8266_elgin_aux_estado_base_valido','on') and not (preservar_fisico | bool)) }}
+    - event: elgin_supervisor_diagnostic_event
+      event_data:
+        stage: evaluation_started
+        evaluation_id: "{{ diagnostico_evaluation_id }}"
+        source_entity_id: script.elgin_supervisor_aplicar_decisao
+        treatment: "{{ desejado }}"
+        mode: "{{ mode_desejado }}"
+        preset: >-
+          {% set chave = {'Aquecimento':'heat','Refrigeração':'cool','Desumidificação':'dry'}.get(desejado) %}
+          {{ ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get(chave,{}) or {}).get('effective_name','Nenhum') if chave else 'Nenhum' }}
+        power: "{{ potencia_desejada }}"
+        agenda_action: "{{ agenda_acao }}"
+        summary: Avaliação atômica do Supervisor iniciada.
+        snapshot: >-
+          {{ {
+            'inputs': {
+              'temperature': states('sensor.sensor_temperatura_sensor_dedicado'),
+              'humidity': states('sensor.sensor_umidade_sensor_dedicado'),
+              'physical_power': power_atual,
+              'physical_mode': mode_atual,
+              'physical_fan': fan_atual,
+              'physical_target_temperature': alvo_atual,
+              'physical_swing_vertical': swing_vertical_atual,
+              'physical_swing_horizontal': swing_horizontal_atual
+            },
+            'prior_decision': {
+              'message': states('input_text.elgin_supervisor_ultima_decisao'),
+              'active_treatment': states('input_select.elgin_supervisor_tratamento_ativo'),
+              'last_ir_signature': assinatura_anterior
+            },
+            'demands': {
+              'heat': states('binary_sensor.elgin_supervisor_demanda_aquecimento'),
+              'cool': states('binary_sensor.elgin_supervisor_demanda_refrigeracao'),
+              'dry': states('binary_sensor.elgin_supervisor_demanda_desumidificacao'),
+              'selected': desejado
+            },
+            'priorities': state_attr('sensor.elgin_supervisor_potencias','priorities') or {},
+            'agenda': {
+              'global_action': agenda_acao,
+              'block_start': agenda_bloquear_partida,
+              'block_automatic_off': agenda_bloquear_desligamento,
+              'snapshot_revision': snapshot_policy,
+              'active_occurrences': state_attr('sensor.elgin_supervisor_agenda_politica','active_occurrences') or []
+            },
+            'presets': {
+              'snapshot_revision': snapshot_preset,
+              'modes': state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}
+            },
+            'powers': {
+              'snapshot_revision': snapshot_power,
+              'modes': state_attr('sensor.elgin_supervisor_potencias','modes') or {},
+              'active_rules': state_attr('sensor.elgin_supervisor_potencias','active_rules') or [],
+              'mode_decision': state_attr('sensor.elgin_supervisor_potencias','mode_decision') or {}
+            },
+            'limits': {
+              'minimum_on_seconds': minimo_ligado,
+              'minimum_off_seconds': minimo_desligado,
+              'effective': state_attr('sensor.elgin_supervisor_potencias','cycle_limits') or {}
+            },
+            'protections': {
+              'manual_pause': states('timer.elgin_supervisor_pausa_manual'),
+              'mode_change': states('timer.elgin_supervisor_protecao_troca_modo'),
+              'reconciliation': states('timer.elgin_supervisor_janela_reconciliacao'),
+              'classification': states('timer.elgin_supervisor_classificacao_fisica')
+            },
+            'desired': {
+              'power': desejado in ['Aquecimento','Refrigeração','Desumidificação'],
+              'treatment': desejado,
+              'mode': mode_desejado,
+              'fan': fan_desejado,
+              'target_temperature': alvo_desejado,
+              'swing': swing_desejado,
+              'power_profile': potencia_desejada,
+              'signature': assinatura_desejada
+            },
+            'integrity': {
+              'consistent': snapshot_consistente,
+              'pipeline_ok': pipeline_integrity_ok,
+              'policy_revision': snapshot_policy,
+              'preset_revision': snapshot_preset,
+              'power_revision': snapshot_power
+            }
+          } }}
     - if:
       - condition: state
         entity_id: input_boolean.elgin_supervisor_habilitado
@@ -2895,6 +3121,15 @@ script:
         data:
           value: |-
             Supervisor desabilitado; nenhuma ação executada.
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: decision_blocked
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: "{{ desejado }}"
+          mode: "{{ mode_desejado }}"
+          protection: supervisor_disabled
+          reason: Supervisor desabilitado; nenhuma action climática foi solicitada.
+          audibility: no_transmission
       - stop: Supervisor desabilitado.
     - if:
       - condition: template
@@ -2906,6 +3141,18 @@ script:
         data:
           value: |-
             Snapshot inconsistente; comando bloqueado. Política={{ snapshot_policy }}, preset={{ snapshot_preset }}, potência={{ snapshot_power }}, integridade={{ pipeline_integrity_ok }}.
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: decision_blocked
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: "{{ desejado }}"
+          mode: "{{ mode_desejado }}"
+          power: "{{ potencia_desejada }}"
+          protection: atomic_snapshot_integrity
+          reason: >-
+            Snapshot inconsistente; policy={{ snapshot_policy }}, preset={{ snapshot_preset }},
+            power={{ snapshot_power }}, integrity={{ pipeline_integrity_ok }}.
+          audibility: no_transmission
       - stop: Aguardando snapshot atômico da Agenda, presets e potência.
     - if:
       - condition: template
@@ -2918,6 +3165,16 @@ script:
         data:
           value: |-
             Agenda ativa: {{ agenda_acao }}; decisões suspensas sem alterar os helpers manuais.
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: decision_blocked
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: "{{ desejado }}"
+          mode: "{{ mode_desejado }}"
+          agenda_action: "{{ agenda_acao }}"
+          protection: agenda_suspend
+          reason: "Agenda ativa: {{ agenda_acao }}; avaliação suspensa."
+          audibility: no_transmission
       - stop: Operação suspensa pela agenda.
     - if:
       - condition: template
@@ -2940,6 +3197,17 @@ script:
           entity_id: input_text.elgin_supervisor_ultima_decisao
         data:
           value: "Agenda ativa: ar desligado e qualquer religamento será bloqueado."
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: evaluation_completed
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: Nenhum
+          agenda_action: power_off_block
+          protection: agenda_power_off_block
+          reason: Agenda impôs desligamento e bloqueio de religamento.
+          audibility: no_transmission
+          result:
+            action: "{{ 'power_off_requested' if power_atual else 'already_off' }}"
       - stop: "Desligamento com bloqueio imposto pela Agenda."
     - if:
       - condition: template
@@ -2971,6 +3239,17 @@ script:
           entity_id: input_text.elgin_supervisor_ultima_decisao
         data:
           value: "Agenda: desligamento único aplicado para esta ocorrência; religamento manual posterior permitido."
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: evaluation_completed
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: Nenhum
+          agenda_action: power_off
+          protection: agenda_single_power_off
+          reason: Desligamento único da Agenda processado para esta ocorrência.
+          audibility: no_transmission
+          result:
+            occurrence_token: "{{ agenda_power_off_token }}"
       - stop: "Desligamento único da Agenda já processado."
     - if:
       - condition: template
@@ -2978,6 +3257,14 @@ script:
           {{ is_state('input_boolean.elgin_aux_sincronizacao_passiva_em_andamento','on')
              or is_state('timer.elgin_supervisor_classificacao_fisica','active') }}
       then:
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: decision_blocked
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: "{{ desejado }}"
+          protection: physical_sync_or_classification
+          reason: Sincronização passiva ou classificação física ainda está em andamento.
+          audibility: no_transmission
       - stop: Aguardando concluir a sincronização/classificação física. O timer libera automaticamente em caso de falha.
     - if:
       - condition: template
@@ -3014,6 +3301,20 @@ script:
                   ~ '%; nenhum IR.' %}
               {{ msg | string | truncate(255,true,'') }}
             {% endif %}
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: evaluation_no_change
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: "{{ desejado }}"
+          mode: "{{ mode_desejado }}"
+          preset: >-
+            {% set chave = {'Aquecimento':'heat','Refrigeração':'cool','Desumidificação':'dry'}.get(desejado) %}
+            {{ ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get(chave,{}) or {}).get('effective_name','Nenhum') if chave else 'Nenhum' }}
+          power: "{{ potencia_desejada }}"
+          agenda_action: "{{ agenda_acao }}"
+          protection: shadow_mode
+          reason: Modo sombra ativo; decisão calculada, mas nenhuma action climática foi solicitada.
+          audibility: no_transmission
       - stop: Modo sombra ativo.
     - if:
       - condition: state
@@ -3041,6 +3342,16 @@ script:
           entity_id: input_select.elgin_supervisor_tratamento_ativo
         data:
           option: Falha
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: evaluation_completed
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: Falha
+          protection: localtuya_fault
+          reason: Falha reportada pelo aparelho; desligamento de segurança solicitado quando necessário.
+          audibility: no_transmission
+          result:
+            action: "{{ 'safety_power_off_requested' if power_atual else 'already_off' }}"
       - stop: Falha reportada pelo aparelho.
     - if:
       - condition: state
@@ -3053,6 +3364,14 @@ script:
         data:
           value: |-
             Fontes locais inválidas; nenhuma transmissão.
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: decision_blocked
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: "{{ desejado }}"
+          protection: invalid_local_sources
+          reason: Sensores ou entidades locais necessários estão inválidos; nenhuma transmissão.
+          audibility: no_transmission
       - stop: Fontes locais inválidas.
     - if:
       - condition: template
@@ -3064,6 +3383,15 @@ script:
           entity_id: input_text.elgin_supervisor_ultima_decisao
         data:
           value: Modo físico sem perfil supervisionado; estado externo preservado sem pausa e sem correção IR.
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: evaluation_no_change
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: "{{ tratamento_fisico }}"
+          power: "{{ potencia_fisica_atual }}"
+          protection: preserve_unsupervised_physical_mode
+          reason: Estado físico externo não supervisionado preservado; nenhum IR corretivo.
+          audibility: no_transmission
       - stop: Modo físico não supervisionado preservado.
     - if:
       - condition: template
@@ -3097,6 +3425,14 @@ script:
         data:
           value: |-
             Controle manual respeitado até o término da pausa.
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: decision_blocked
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: "{{ desejado }}"
+          protection: manual_pause
+          reason: Controle manual respeitado até o término da pausa configurada.
+          audibility: no_transmission
       - stop: Pausa manual ativa.
     - if:
       - condition: template
@@ -3109,6 +3445,15 @@ script:
         data:
           value: |-
             Aguardando proteção para troca de modo.
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: decision_blocked
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: "{{ desejado }}"
+          mode: "{{ mode_desejado }}"
+          protection: mode_change_minimum_time
+          reason: Proteção temporal de troca de modo ainda está ativa.
+          audibility: no_transmission
       - stop: Proteção de troca de modo ativa.
     - if:
       - condition: template
@@ -3116,6 +3461,14 @@ script:
           {{ is_state('script.elgin_supervisor_transmitir_estado','on')
              or not is_state('timer.elgin_supervisor_janela_reconciliacao','idle') }}
       then:
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: decision_blocked
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: "{{ desejado }}"
+          protection: transmission_or_reconciliation_in_progress
+          reason: Há uma transmissão única ou reconciliação física ainda em andamento.
+          audibility: no_transmission
       - stop: Aguardando concluir a única transmissão em curso e sua reconciliação física.
     - if:
       - condition: template
@@ -3139,6 +3492,16 @@ script:
                 ~ ', swing=' ~ state_attr('sensor.elgin_supervisor_estado_fisico_observado','swing_normalizado')
                 ~ '. O Supervisor reassumirá somente quando tratamento ou potência calculada mudar.' %}
             {{ msg | string | truncate(255,true,'') }}
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: evaluation_no_change
+          evaluation_id: "{{ diagnostico_evaluation_id }}"
+          treatment: "{{ tratamento_fisico }}"
+          mode: "{{ mode_atual }}"
+          power: "{{ potencia_fisica_atual }}"
+          protection: preserve_adopted_physical_state
+          reason: Estado físico adotado corresponde à política de preservação; nenhum IR corretivo.
+          audibility: no_transmission
       - stop: Estado físico preservado; comparação com o perfil automático não deve gerar IR corretivo.
     - choose:
       - conditions:
@@ -3151,6 +3514,15 @@ script:
             value_template: |-
               {{ agenda_bloquear_desligamento | bool }}
           then:
+          - event: elgin_supervisor_diagnostic_event
+            event_data:
+              stage: decision_blocked
+              evaluation_id: "{{ diagnostico_evaluation_id }}"
+              treatment: Nenhum
+              agenda_action: "{{ agenda_acao }}"
+              protection: agenda_block_automatic_off
+              reason: Agenda bloqueia o desligamento automático neste período.
+              audibility: no_transmission
           - stop: Agenda bloqueia o desligamento automático neste período.
         - if:
           - condition: template
@@ -3163,6 +3535,16 @@ script:
             data:
               value: |-
                 Desligamento adiado pelo tempo mínimo ligado.
+          - event: elgin_supervisor_diagnostic_event
+            event_data:
+              stage: decision_blocked
+              evaluation_id: "{{ diagnostico_evaluation_id }}"
+              treatment: Nenhum
+              protection: minimum_on_time
+              reason: >-
+                Desligamento adiado: {{ segundos_power | float(0) | round(0) }}s desde Power ON,
+                mínimo={{ minimo_ligado | float(0) | round(0) }}s.
+              audibility: no_transmission
           - stop: Tempo mínimo ligado ainda não terminou.
         - if:
           - condition: template
@@ -3191,6 +3573,15 @@ script:
               entity_id: input_text.elgin_supervisor_ultima_decisao
             data:
               value: Nenhuma demanda ativa e aparelho já desligado.
+        - event: elgin_supervisor_diagnostic_event
+          event_data:
+            stage: evaluation_completed
+            evaluation_id: "{{ diagnostico_evaluation_id }}"
+            treatment: Nenhum
+            reason: Nenhuma demanda ativa; aparelho desligado ou desligamento solicitado pelo Supervisor.
+            audibility: no_transmission
+            result:
+              action: "{{ 'power_off_requested' if power_atual else 'already_off' }}"
       - conditions:
         - condition: template
           value_template: |-
@@ -3201,6 +3592,16 @@ script:
             value_template: |-
               {{ agenda_bloquear_partida | bool and not power_atual }}
           then:
+          - event: elgin_supervisor_diagnostic_event
+            event_data:
+              stage: decision_blocked
+              evaluation_id: "{{ diagnostico_evaluation_id }}"
+              treatment: "{{ desejado }}"
+              mode: "{{ mode_desejado }}"
+              agenda_action: "{{ agenda_acao }}"
+              protection: agenda_block_start
+              reason: Agenda bloqueia novas partidas neste período.
+              audibility: no_transmission
           - stop: Agenda bloqueia novas partidas neste período.
         - if:
           - condition: template
@@ -3212,6 +3613,17 @@ script:
               entity_id: input_text.elgin_supervisor_ultima_decisao
             data:
               value: Partida adiada pelo tempo mínimo desligado.
+          - event: elgin_supervisor_diagnostic_event
+            event_data:
+              stage: decision_blocked
+              evaluation_id: "{{ diagnostico_evaluation_id }}"
+              treatment: "{{ desejado }}"
+              mode: "{{ mode_desejado }}"
+              protection: minimum_off_time
+              reason: >-
+                Partida adiada: {{ segundos_power | float(0) | round(0) }}s desde Power OFF,
+                mínimo={{ minimo_desligado | float(0) | round(0) }}s.
+              audibility: no_transmission
           - stop: Tempo mínimo desligado ainda não terminou.
         - if:
           - condition: template
@@ -3242,12 +3654,47 @@ script:
               entity_id: input_select.elgin_supervisor_tratamento_ativo
             data:
               option: Transição
+          - event: elgin_supervisor_diagnostic_event
+            event_data:
+              stage: evaluation_completed
+              evaluation_id: "{{ diagnostico_evaluation_id }}"
+              treatment: Transição
+              mode: "{{ mode_atual }}"
+              protection: mode_change_started
+              reason: "Troca de {{ mode_atual }} para {{ mode_desejado }}: Power OFF solicitado antes da proteção."
+              audibility: no_transmission
+              result:
+                next_mode: "{{ mode_desejado }}"
           - stop: Transição de modo iniciada.
         - if:
           - condition: template
             value_template: |-
               {{ diferenca | bool }}
           then:
+          - event: elgin_supervisor_diagnostic_event
+            event_data:
+              stage: decision_calculated
+              evaluation_id: "{{ diagnostico_evaluation_id }}"
+              treatment: "{{ desejado }}"
+              mode: "{{ mode_desejado }}"
+              preset: >-
+                {% set chave = {'Aquecimento':'heat','Refrigeração':'cool','Desumidificação':'dry'}.get(desejado) %}
+                {{ ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get(chave,{}) or {}).get('effective_name','Nenhum') if chave else 'Nenhum' }}
+              power: "{{ potencia_desejada }}"
+              agenda_action: "{{ agenda_acao }}"
+              reason: Configuração desejada difere do estado físico; um estado completo será solicitado.
+              audibility: no_transmission
+              desired:
+                power: true
+                mode: "{{ mode_desejado }}"
+                fan: "{{ fan_desejado }}"
+                target_temperature: "{{ alvo_desejado }}"
+                swing: "{{ swing_desejado }}"
+                ifeel: "{{ ifeel_desejado }}"
+                turbo: "{{ turbo_desejado }}"
+                sleep: "{{ sleep_desejado }}"
+                health: "{{ health_desejado }}"
+                signature: "{{ assinatura_desejada }}"
           - action: script.elgin_supervisor_transmitir_estado
             data:
               tratamento: |-
@@ -3264,6 +3711,18 @@ script:
                 alvo={{ alvo_desejado }}°C, fan={{ fan_desejado }},
                 swing={{ swing_desejado }}.
           else:
+          - event: elgin_supervisor_diagnostic_event
+            event_data:
+              stage: evaluation_no_change
+              evaluation_id: "{{ diagnostico_evaluation_id }}"
+              treatment: "{{ desejado }}"
+              mode: "{{ mode_desejado }}"
+              preset: >-
+                {% set chave = {'Aquecimento':'heat','Refrigeração':'cool','Desumidificação':'dry'}.get(desejado) %}
+                {{ ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get(chave,{}) or {}).get('effective_name','Nenhum') if chave else 'Nenhum' }}
+              power: "{{ potencia_desejada }}"
+              reason: Estado físico e assinatura já correspondem à configuração desejada.
+              audibility: no_transmission
           - action: input_select.select_option
             target:
               entity_id: input_select.elgin_supervisor_tratamento_ativo
@@ -3298,6 +3757,23 @@ script:
                       ~ '; nenhum IR.' %}
                   {{ msg | string | truncate(255,true,'') }}
                 {% endif %}
+        - event: elgin_supervisor_diagnostic_event
+          event_data:
+            stage: evaluation_completed
+            evaluation_id: "{{ diagnostico_evaluation_id }}"
+            treatment: "{{ desejado }}"
+            mode: "{{ mode_desejado }}"
+            preset: >-
+              {% set chave = {'Aquecimento':'heat','Refrigeração':'cool','Desumidificação':'dry'}.get(desejado) %}
+              {{ ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get(chave,{}) or {}).get('effective_name','Nenhum') if chave else 'Nenhum' }}
+            power: "{{ potencia_desejada }}"
+            agenda_action: "{{ agenda_acao }}"
+            reason: "{{ states('input_text.elgin_supervisor_ultima_decisao') }}"
+            audibility: no_transmission
+            result:
+              action: "{{ 'transmission_path_evaluated' if diferenca | bool else 'no_action' }}"
+              transmission_outcome_source: Eventos correlacionados do script transmissor
+              desired_signature: "{{ assinatura_desejada }}"
   elgin_supervisor_avaliar_agora:
     alias: Elgin Supervisor - Avaliar agora
     icon: mdi:play-circle
@@ -3340,6 +3816,22 @@ script:
           {{ states('sensor.sensor_temperatura_sensor_dedicado') | float(0) | round(1) }}
         umidade_atual: |-
           {{ states('sensor.sensor_umidade_sensor_dedicado') | float(0) | round(0) | int }}
+    - event: elgin_supervisor_diagnostic_event
+      event_data:
+        stage: external_change
+        evaluation_id: >-
+          {{ state_attr('sensor.elgin_supervisor_configuracao_desejada','evaluation_id')
+             | default(state_attr('sensor.elgin_supervisor_potencias','evaluation_id'), true) }}
+        function: observed_power_off
+        treatment: "{{ tratamento_anterior }}"
+        reason: >-
+          Power OFF observado pelo LocalTuya em {{ origem_final }}; ciclo interno será encerrado
+          passivamente, sem atribuir a origem física do comando.
+        confirmed:
+          power: false
+          source_entity_id: "{{ origem_final }}"
+          reconciliation_was_active: "{{ reconciliacao_estava_ativa }}"
+          classification_was_active: "{{ classificacao_estava_ativa }}"
     - action: script.turn_off
       continue_on_error: true
       target:
@@ -4005,6 +4497,29 @@ automation:
     event_data:
       entity_id: timer.elgin_supervisor_janela_reconciliacao
   actions:
+  - event: elgin_supervisor_diagnostic_event
+    event_data:
+      stage: trigger_received
+      evaluation_id: >-
+        {{ state_attr('sensor.elgin_supervisor_configuracao_desejada','evaluation_id')
+           | default(state_attr('sensor.elgin_supervisor_potencias','evaluation_id'), true)
+           | default('trigger-' ~ now().strftime('%Y%m%dT%H%M%S%f'), true) }}
+      trigger_model: "{{ trigger.platform | default('unknown', true) }}"
+      trigger_entity_id: >-
+        {% if trigger is defined and trigger.platform == 'state' %}{{ trigger.entity_id }}
+        {% elif trigger is defined and trigger.platform == 'event' %}{{ trigger.event.data.entity_id | default(trigger.event.event_type, true) }}
+        {% else %}time_pattern{% endif %}
+      summary: Reavaliação solicitada por gatilho do Supervisor.
+      trigger:
+        platform: "{{ trigger.platform | default('unknown', true) }}"
+        entity_id: >-
+          {{ trigger.entity_id if trigger is defined and trigger.platform == 'state' else none }}
+        before: >-
+          {{ trigger.from_state.state if trigger is defined and trigger.platform == 'state' and trigger.from_state is not none else none }}
+        after: >-
+          {{ trigger.to_state.state if trigger is defined and trigger.platform == 'state' and trigger.to_state is not none else none }}
+        event_type: >-
+          {{ trigger.event.event_type if trigger is defined and trigger.platform == 'event' else none }}
   - if:
     - condition: template
       value_template: |-
@@ -4205,6 +4720,19 @@ automation:
         value_template: |-
           {{ confirmacao_ultimo_ir | bool }}
       sequence:
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: localtuya_confirmed
+          evaluation_id: >-
+            {{ state_attr('sensor.elgin_supervisor_configuracao_desejada','evaluation_id')
+               | default(state_attr('sensor.elgin_supervisor_potencias','evaluation_id'), true) }}
+          treatment: "{{ states('input_select.elgin_supervisor_tratamento_ativo') }}"
+          mode: "{{ state_attr('sensor.elgin_supervisor_estado_fisico_observado','mode_normalizado') | default('', true) }}"
+          summary: LocalTuya confirmou a assinatura observável do último estado IR solicitado.
+          confirmed:
+            observed_signature: "{{ assinatura_observada }}"
+            expected_signature: "{{ assinatura_esperada }}"
+            elapsed_since_request_seconds: "{{ segundos_desde_ultimo_ir | float(0) | round(1) }}"
       - action: timer.cancel
         target:
           entity_id: timer.elgin_supervisor_janela_reconciliacao
@@ -4219,6 +4747,17 @@ automation:
         entity_id: binary_sensor.elgin_supervisor_fisico_semiautomatico_efetivo
         state: 'on'
       sequence:
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: external_change
+          evaluation_id: >-
+            {{ state_attr('sensor.elgin_supervisor_configuracao_desejada','evaluation_id')
+               | default(state_attr('sensor.elgin_supervisor_potencias','evaluation_id'), true) }}
+          function: physical_adoption
+          reason: Alteração LocalTuya não correspondeu ao último IR; política semi-automática adotará o estado observado.
+          confirmed:
+            observed_signature: "{{ assinatura_observada }}"
+            expected_signature: "{{ assinatura_esperada }}"
       - action: timer.cancel
         target:
           entity_id: timer.elgin_supervisor_janela_reconciliacao
@@ -4236,6 +4775,17 @@ automation:
         entity_id: binary_sensor.elgin_supervisor_respeitar_controle_manual_efetivo
         state: 'on'
       sequence:
+      - event: elgin_supervisor_diagnostic_event
+        event_data:
+          stage: external_change
+          evaluation_id: >-
+            {{ state_attr('sensor.elgin_supervisor_configuracao_desejada','evaluation_id')
+               | default(state_attr('sensor.elgin_supervisor_potencias','evaluation_id'), true) }}
+          function: manual_pause
+          reason: Alteração LocalTuya não correspondeu ao último IR; estado marcado externo/indeterminado e pausa manual iniciada.
+          confirmed:
+            observed_signature: "{{ assinatura_observada }}"
+            expected_signature: "{{ assinatura_esperada }}"
       - action: timer.cancel
         target:
           entity_id: timer.elgin_supervisor_janela_reconciliacao
@@ -4264,6 +4814,17 @@ automation:
         data:
           value: Alteração física consolidada; automação pausada para respeitar o controle manual.
     default:
+    - event: elgin_supervisor_diagnostic_event
+      event_data:
+        stage: external_change
+        evaluation_id: >-
+          {{ state_attr('sensor.elgin_supervisor_configuracao_desejada','evaluation_id')
+             | default(state_attr('sensor.elgin_supervisor_potencias','evaluation_id'), true) }}
+        function: automatic_reconciliation
+        reason: Alteração LocalTuya não correspondeu ao último IR; Supervisor reavaliará sem atribuir causa física.
+        confirmed:
+          observed_signature: "{{ assinatura_observada }}"
+          expected_signature: "{{ assinatura_esperada }}"
     - action: timer.cancel
       target:
         entity_id: timer.elgin_supervisor_janela_reconciliacao
