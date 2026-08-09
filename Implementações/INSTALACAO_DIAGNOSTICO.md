@@ -38,7 +38,7 @@ arquivos do ESPHome.
    para correção manual.
 7. Em Lovelace no modo storage, o recurso é registrado automaticamente como:
 
-   `/elgin_supervisor_diagnostico/frontend/elgin-supervisor-diagnostico-card.js?v=1.0.0`
+   `/elgin_supervisor_diagnostico/frontend/elgin-supervisor-diagnostico-card.js?v=1.0.2`
 
    Se os recursos forem mantidos em YAML, registre essa URL manualmente como
    `module`. Remova somente URLs antigas do mesmo card após confirmar o backup.

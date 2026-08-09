@@ -4,7 +4,7 @@
   const DOMAIN = "elgin_supervisor_diagnostico";
   const CARD_TAG = "elgin-supervisor-diagnostico-card";
   const PICKER_TAG = "elgin-diagnostic-multiselect";
-  const BUILD = "diagnostico-observabilidade-20260808.1";
+  const BUILD = "diagnostico-observabilidade-20260809.3";
 
   const TABS = [
     ["overview", "Panorama", "mdi:view-dashboard-outline"],
@@ -23,6 +23,8 @@
   const EVENT_TABS = new Set([
     "timeline", "decisions", "states", "actions", "external", "observations",
   ]);
+
+  const FILTER_TABS = new Set([...EVENT_TABS, "statistics"]);
 
   const FACET_FILTERS = [
     ["categories", "Categoria"],
@@ -332,13 +334,22 @@
     ]);
     return [...keys].sort().map((field) => {
       const change = asObject(changes[field]);
+      const hasStructuredChange = Object.prototype.hasOwnProperty.call(changes, field);
+      const beforeValue = change.before_present === false
+        ? undefined
+        : Object.prototype.hasOwnProperty.call(change, "before") ? change.before : left?.[field];
+      const afterValue = change.after_present === false
+        ? undefined
+        : Object.prototype.hasOwnProperty.call(change, "after") ? change.after : right?.[field];
+      let valuesEqual = beforeValue === afterValue;
+      if (!valuesEqual && beforeValue && afterValue && typeof beforeValue === "object" && typeof afterValue === "object") {
+        try { valuesEqual = JSON.stringify(beforeValue) === JSON.stringify(afterValue); } catch (_error) { /* unequal */ }
+      }
       return {
         field,
-        before: change.before !== undefined ? change.before : left?.[field],
-        after: change.after !== undefined ? change.after : right?.[field],
-        changed: change.before !== undefined || change.after !== undefined
-          ? change.before !== change.after
-          : left?.[field] !== right?.[field],
+        before: beforeValue,
+        after: afterValue,
+        changed: hasStructuredChange || !valuesEqual,
       };
     });
   };
@@ -655,7 +666,7 @@
 
           <nav class="tabs" role="tablist" aria-label="Áreas do diagnóstico">${tabs}</nav>
 
-          <section class="query-toolbar" aria-label="Busca e filtros">
+          <section id="query-toolbar" class="query-toolbar" aria-label="Busca e filtros">
             <label class="global-search"><ha-icon icon="mdi:magnify"></ha-icon><input id="global-search" type="search" placeholder="Buscar resumo, entidade, usuário, regra, preset, potência, ação ou correlação" aria-label="Busca textual global"><button type="button" class="icon-button" data-action="clear-search" aria-label="Limpar busca"><ha-icon icon="mdi:close"></ha-icon></button></label>
             <button type="button" class="secondary" data-action="toggle-filters" aria-expanded="false"><ha-icon icon="mdi:filter-variant"></ha-icon>Filtros <span id="filter-count" class="count-badge">0</span></button>
             <label class="saved-select"><span class="sr-only">Filtro salvo</span><select id="saved-filter-select" aria-label="Abrir filtro salvo"><option value="">Filtros salvos</option></select></label>
@@ -714,7 +725,7 @@
                 <article class="surface flow-surface"><div class="section-title"><div><div class="eyebrow">Correlação mais recente</div><h2>Último fluxo completo</h2></div><ha-icon icon="mdi:transit-connection-variant"></ha-icon></div><div id="last-flow" class="flow"></div></article>
                 <article class="surface"><div class="section-title"><div><div class="eyebrow">Estado atual</div><h2>Supervisor e tratamento</h2></div><ha-icon icon="mdi:robot-outline"></ha-icon></div><dl id="overview-state" class="definition-list"></dl></article>
               </div>
-              <article class="surface"><div class="section-title"><div><div class="eyebrow">Eventos essenciais</div><h2>Atividade recente</h2></div><button type="button" class="secondary" data-tab-jump="timeline">Abrir linha do tempo</button></div><div id="recent-events" class="compact-events"></div></article>
+              <article class="surface"><div class="section-title"><div><div class="eyebrow">Eventos essenciais</div><h2>Atividade recente</h2><p class="section-subtitle">Resumo fixo dos eventos mais recentes. Busca e filtros ficam disponíveis nas abas de consulta.</p></div><button type="button" class="secondary" data-tab-jump="timeline">Abrir linha do tempo</button></div><div id="recent-events" class="compact-events"></div></article>
             </section>
 
             ${this._eventPanelTemplate("timeline", "Linha do tempo", "Todos os acontecimentos correlacionáveis em ordem temporal.")}
@@ -841,7 +852,9 @@
         banner: root.querySelector("#status-banner"),
         pendingBanner: root.querySelector("#pending-banner"),
         pendingLabel: root.querySelector("#pending-label"),
+        queryToolbar: root.querySelector("#query-toolbar"),
         filterPanel: root.querySelector("#filter-panel"),
+        filterToggle: root.querySelector('[data-action="toggle-filters"]'),
         filterCount: root.querySelector("#filter-count"),
         querySummary: root.querySelector("#query-summary"),
         globalSearch: root.querySelector("#global-search"),
@@ -1040,6 +1053,7 @@
       if (!TABS.some(([id]) => id === tab)) return;
       this._activeTab = tab;
       storageSet(this._storageKey("active_tab"), tab);
+      this._setFilterPanelOpen(false);
       this._activateTabDom();
       if (EVENT_TABS.has(tab)) this._ensureEventsLoaded(tab);
       if (tab === "anomalies") this._loadAnomalies();
@@ -1057,6 +1071,17 @@
       this.shadowRoot.querySelectorAll("[data-panel]").forEach((panel) => {
         panel.hidden = panel.dataset.panel !== this._activeTab;
       });
+      const filtersAvailable = FILTER_TABS.has(this._activeTab);
+      if (this._nodes?.queryToolbar) this._nodes.queryToolbar.hidden = !filtersAvailable;
+      if (this._nodes?.quickFilters) this._nodes.quickFilters.hidden = !filtersAvailable;
+      if (!filtersAvailable) this._setFilterPanelOpen(false);
+    }
+
+    _setFilterPanelOpen(open) {
+      if (!this._nodes?.filterPanel) return;
+      const shouldOpen = Boolean(open) && FILTER_TABS.has(this._activeTab);
+      this._nodes.filterPanel.hidden = !shouldOpen;
+      this._nodes.filterToggle?.setAttribute("aria-expanded", String(shouldOpen));
     }
 
     async _ensureEventsLoaded(tab) {
@@ -1387,13 +1412,14 @@
       this._updateDependentFacets();
     }
 
-    async _applyFilters() {
+    async _applyFilters(options = {}) {
       this._readAllFilterControls();
       this._appliedFilters = clone(this._normalizeFilterPayload(this._filterDraft));
       EVENT_TABS.forEach((tab) => this._viewStates.set(tab, this._newViewState()));
       this._pendingEvents = 0;
       this._updatePendingBanner();
       this._updateFilterCount();
+      if (options.closePanel === true) this._setFilterPanelOpen(false);
       if (EVENT_TABS.has(this._activeTab)) await this._loadEvents(this._activeTab, { reset: true });
       if (this._activeTab === "statistics") {
         await this._loadStatistics();
@@ -1738,7 +1764,7 @@
       const metrics = [
         ["health", "Saúde do diagnóstico", healthLabel, "mdi:heart-pulse", snapshot.healthy === false || status.healthy === false ? "error" : "success"],
         ["supervisor", "Estado do Supervisor", status.supervisor_state ?? snapshot.supervisor_state ?? "Não disponível", "mdi:robot-outline", "info"],
-        ["treatment", "Tratamento atual", status.treatment ?? snapshot.treatment ?? "Nenhum", "mdi:thermostat-auto", "cyan"],
+        ["treatment", "Tratamento atual", status.treatment ?? snapshot.treatment ?? "Indisponível", "mdi:thermostat-auto", "cyan"],
         ["last_decision", "Última decisão", this._shortText(snapshot.last_decision?.summary ?? snapshot.last_decision ?? "Nenhuma"), "mdi:state-machine", "purple"],
         ["last_action", "Última ação", this._shortText(snapshot.last_action?.summary ?? snapshot.last_action ?? "Nenhuma"), "mdi:play-circle-outline", "orange"],
         ["last_esphome", "Última solicitação ESPHome", this._shortText(snapshot.last_esphome?.summary ?? snapshot.last_esphome_request?.summary ?? "Nenhuma"), "mdi:remote", "orange"],
@@ -1766,14 +1792,25 @@
 
       const stateNode = this.shadowRoot.querySelector("#overview-state");
       if (stateNode) {
+        const currentTreatment = status.treatment ?? snapshot.treatment;
+        const effectiveApplicable = status.effective_configuration_applicable
+          ?? snapshot.effective_configuration_applicable
+          ?? ["Aquecimento", "Refrigeração", "Desumidificação"].includes(currentTreatment);
+        const effectiveFallback = currentTreatment == null
+          ? "Tratamento indisponível"
+          : currentTreatment === "Nenhum"
+            ? "Não aplicável — sem tratamento ativo"
+            : effectiveApplicable
+              ? "Entidade indisponível"
+              : "Não aplicável ao tratamento atual";
         const entries = [
-          ["Tratamento", status.treatment ?? snapshot.treatment],
-          ["Modo físico", status.physical_mode ?? snapshot.physical_mode],
-          ["Preset efetivo", status.preset ?? snapshot.preset],
-          ["Potência efetiva", status.power_profile ?? snapshot.power_profile],
-          ["Agenda influenciando", status.agenda ?? snapshot.agenda],
-          ["Proteção ativa", status.protection ?? snapshot.protection],
-          ["Última confirmação", snapshot.last_confirmation?.summary ?? snapshot.last_confirmation],
+          ["Tratamento", currentTreatment ?? "Entidade indisponível"],
+          ["Modo físico", status.physical_mode ?? snapshot.physical_mode ?? "Entidade indisponível"],
+          ["Preset efetivo", status.preset ?? snapshot.preset ?? effectiveFallback],
+          ["Potência efetiva", status.power_profile ?? snapshot.power_profile ?? effectiveFallback],
+          ["Agenda influenciando", status.agenda ?? snapshot.agenda ?? "Não informada"],
+          ["Proteção ativa", status.protection ?? snapshot.protection ?? "Nenhuma"],
+          ["Última confirmação", snapshot.last_confirmation?.summary ?? snapshot.last_confirmation?.event_type ?? "Nenhuma desde o início do diagnóstico"],
         ];
         stateNode.replaceChildren(this._definitionFragment(entries));
       }
@@ -1781,14 +1818,13 @@
       const flowNode = this.shadowRoot.querySelector("#last-flow");
       if (flowNode) {
         const flow = asArray(snapshot.last_complete_flow?.steps ?? snapshot.last_flow?.steps ?? snapshot.last_complete_flow ?? snapshot.last_flow);
-        const fallback = ["Sensor mudou", "Supervisor avaliou", "Decisão calculada", "Ação verificada", "Estado observado"];
-        const steps = flow.length ? flow : fallback.map((label) => ({ label, status: "unknown" }));
+        const steps = this._overviewFlowSteps(flow);
         const fragment = document.createDocumentFragment();
         steps.forEach((step, index) => {
-          const value = typeof step === "string" ? { label: step } : step;
           const item = document.createElement("div");
-          item.className = `flow-step ${esc(value.status || value.outcome || "unknown")}`;
-          item.innerHTML = `<span class="flow-index">${index + 1}</span><div><strong>${esc(value.label || value.summary || value.event_type || "Etapa")}</strong>${value.detail || value.reason ? `<small>${esc(value.detail || value.reason)}</small>` : ""}</div>${index < steps.length - 1 ? '<ha-icon icon="mdi:arrow-right"></ha-icon>' : ""}`;
+          item.className = `flow-step ${esc(step.status || "unknown")}`;
+          item.title = step.fullText || step.label;
+          item.innerHTML = `<span class="flow-index">${index + 1}</span><div><strong>${esc(step.label)}</strong>${step.detail ? `<small>${esc(step.detail)}</small>` : ""}</div>${index < steps.length - 1 ? '<ha-icon icon="mdi:arrow-right"></ha-icon>' : ""}`;
           fragment.append(item);
         });
         flowNode.replaceChildren(fragment);
@@ -1799,6 +1835,44 @@
         recentNode.replaceChildren(this._compactEventFragment(recent.length ? recent : asArray(snapshot.events).slice(0, 8)));
       }
       this._renderMaintenance();
+    }
+
+    _overviewFlowSteps(flow) {
+      const phases = [
+        ["sensor", "Sensor mudou"],
+        ["evaluation", "Supervisor avaliou"],
+        ["decision", "Decisão calculada"],
+        ["action", "Ação verificada"],
+        ["observed", "Estado observado"],
+      ];
+      const matches = new Map();
+      asArray(flow).forEach((rawStep) => {
+        const step = typeof rawStep === "string" ? { label: rawStep } : asObject(rawStep);
+        const phase = this._flowPhase(step);
+        if (phase) matches.set(phase, step);
+      });
+      return phases.map(([phase, label]) => {
+        const match = matches.get(phase);
+        const fullText = match
+          ? semanticValue(match.label || match.summary || match.reason || match.event_type || label)
+          : "";
+        return {
+          label,
+          status: match?.status || match?.outcome || "unknown",
+          detail: fullText ? this._shortText(fullText, 92) : "",
+          fullText,
+        };
+      });
+    }
+
+    _flowPhase(step) {
+      const signature = `${step.event_type || ""} ${step.category || ""} ${step.label || ""}`.toLocaleLowerCase("pt-BR");
+      if (/localtuya|external|confirm|observ/.test(signature)) return "observed";
+      if (/transmiss|action|service|command|comando|eco_requested/.test(signature)) return "action";
+      if (/decision|decis/.test(signature)) return "decision";
+      if (/evaluation|avalia|supervisor avaliou/.test(signature)) return "evaluation";
+      if (/state|sensor|input_|mudou|alterou/.test(signature)) return "sensor";
+      return null;
     }
 
     _definitionFragment(entries) {
@@ -2097,7 +2171,10 @@
       this._activeDetailTab = "comparison";
       this._nodes.detailLoading.hidden = false;
       this._nodes.detailContent.replaceChildren();
-      this._openDialog(this._nodes.eventDialog, this._settingsSaved.interface_detail_mode === "modal");
+      // Always use the top layer. A non-modal dialog remains inside the card's
+      // containment context and can be clipped by the dashboard. CSS still
+      // renders this as a side panel when that interface mode is selected.
+      this._openDialog(this._nodes.eventDialog, true);
       try {
         const response = await this._ws("get_event", { event_id: eventId });
         const event = asObject(response?.event ?? response);
@@ -2151,7 +2228,8 @@
       const rows = comparisonRows(before, after, diff);
       const lifecycle = document.createElement("div");
       lifecycle.className = "lifecycle-note";
-      if (before === null) lifecycle.textContent = "Antes = null: a entidade ainda não existia.";
+      if (before === undefined && after === undefined) lifecycle.textContent = "Este tipo de evento não possui snapshots Antes/Depois. Chamadas de ação e eventos de manutenção usam outras seções técnicas.";
+      else if (before === null) lifecycle.textContent = "Antes = null: a entidade ainda não existia.";
       else if (after === null) lifecycle.textContent = "Depois = null: a entidade foi removida.";
       else lifecycle.textContent = "Snapshots capturados atomicamente no state_changed; valores unknown e unavailable são preservados literalmente.";
       fragment.append(lifecycle);
@@ -2159,7 +2237,7 @@
       tableWrap.className = "table-wrap comparison-wrap";
       const showUnchanged = Boolean(this._settingsSaved.interface_show_unchanged_attributes);
       const visible = showUnchanged ? rows : rows.filter((row) => row.changed);
-      tableWrap.innerHTML = `<table class="comparison-table"><thead><tr><th>Campo</th><th>Antes</th><th>Depois</th><th>Mudança</th></tr></thead><tbody>${visible.map((row) => `<tr class="${row.changed ? "changed" : "unchanged"}"><th>${esc(row.field)}</th><td>${esc(semanticValue(row.before))}</td><td>${esc(semanticValue(row.after))}</td><td>${row.changed ? "alterado" : "—"}</td></tr>`).join("") || '<tr><td colspan="4">Nenhuma diferença estruturada disponível.</td></tr>'}</tbody></table>`;
+      tableWrap.innerHTML = `<table class="comparison-table"><thead><tr><th>Campo</th><th>Antes</th><th>Depois</th><th>Mudança</th></tr></thead><tbody>${visible.map((row) => `<tr class="${row.changed ? "changed" : "unchanged"}"><th>${esc(row.field)}</th><td>${this._comparisonCellHtml(row.before)}</td><td>${this._comparisonCellHtml(row.after)}</td><td>${row.changed ? "alterado" : "—"}</td></tr>`).join("") || '<tr><td colspan="4">Nenhuma diferença estruturada disponível.</td></tr>'}</tbody></table>`;
       fragment.append(tableWrap);
       const full = document.createElement("details");
       full.innerHTML = `<summary>Mostrar estado completo</summary><div class="json-columns"><div><h4>Antes</h4><pre>${esc(this._pretty(before))}</pre></div><div><h4>Depois</h4><pre>${esc(this._pretty(after))}</pre></div><div><h4>Diferença</h4><pre>${esc(this._pretty(diff))}</pre></div></div>`;
@@ -2180,13 +2258,37 @@
 
     _technicalDetailHtml(event) {
       const details = event.details_json ?? event.details ?? {};
+      const serviceData = event.service_data ?? asObject(details).service_data;
+      const evaluation = this._detailEvaluation;
+      const supervisorLayers = {
+        agenda: event.agenda ?? evaluation?.agenda,
+        presets: event.preset ?? evaluation?.presets,
+        powers: event.power_profile ?? evaluation?.powers,
+        protections: event.protection ?? evaluation?.protections,
+      };
       return `<div class="technical-sections">
         <details open><summary>Raw event sanitizado</summary><pre>${esc(this._pretty(event))}</pre></details>
-        <details><summary>Service data</summary><pre>${esc(this._pretty(event.service_data ?? asObject(details).service_data))}</pre></details>
-        <details><summary>Avaliação completa</summary><pre>${esc(this._pretty(this._detailEvaluation))}</pre></details>
-        <details><summary>Agenda / Preset / Potência / Proteções</summary><pre>${esc(this._pretty({ agenda: event.agenda ?? this._detailEvaluation?.agenda, presets: event.preset ?? this._detailEvaluation?.presets, powers: event.power_profile ?? this._detailEvaluation?.powers, protections: event.protection ?? this._detailEvaluation?.protections }))}</pre></details>
+        <details><summary>Service data</summary>${this._technicalPayloadHtml(serviceData, "Não se aplica: este evento não foi originado por uma chamada de serviço capturada.")}</details>
+        <details><summary>Avaliação completa</summary>${this._technicalPayloadHtml(evaluation, event.evaluation_id ? "A avaliação vinculada não pôde ser recuperada." : "Não se aplica: este evento não possui evaluation_id.")}</details>
+        <details><summary>Agenda / Preset / Potência / Proteções</summary>${this._technicalPayloadHtml(supervisorLayers, "Nenhum dado estruturado dessas camadas está associado a este evento.")}</details>
         <p class="layer-note"><strong>Frame bruto:</strong> ${esc(event.raw_frame ?? "Não disponível nesta camada de diagnóstico.")}</p>
       </div>`;
+    }
+
+    _technicalPayloadHtml(value, emptyMessage) {
+      const empty = value === undefined
+        || value === null
+        || (typeof value === "object" && !Array.isArray(value) && !Object.values(value).some((item) => item !== undefined && item !== null && item !== ""));
+      return empty
+        ? `<p class="detail-empty">${esc(emptyMessage)}</p>`
+        : `<pre>${esc(this._pretty(value))}</pre>`;
+    }
+
+    _comparisonCellHtml(value) {
+      const rendered = value && typeof value === "object"
+        ? this._pretty(value)
+        : semanticValue(value);
+      return `<code class="comparison-value">${esc(rendered)}</code>`;
     }
 
     _relatedDetailFragment() {
@@ -2285,11 +2387,9 @@
     async _handleAction(action, source) {
       try {
         if (action === "toggle-filters") {
-          const hidden = this._nodes.filterPanel.hidden;
-          this._nodes.filterPanel.hidden = !hidden;
-          source.setAttribute("aria-expanded", String(hidden));
+          this._setFilterPanelOpen(this._nodes.filterPanel.hidden);
         } else if (action === "apply-filters") {
-          await this._applyFilters();
+          await this._applyFilters({ closePanel: true });
         } else if (action === "clear-filters") {
           await this._clearFilters();
         } else if (action === "clear-search") {
@@ -2775,8 +2875,8 @@
         .advanced-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.advanced-head p{color:var(--secondary-text-color)}.advanced-builder{display:grid;gap:10px}.filter-group{border:1px solid var(--divider-color);border-radius:13px;padding:11px;background:var(--card-background-color)}.filter-group>header{display:flex;justify-content:space-between;align-items:end;gap:10px}.filter-group>header label{font-size:.77rem;color:var(--secondary-text-color)}.conditions{display:grid;gap:8px;margin-top:10px}.condition-row{display:grid;grid-template-columns:minmax(140px,1.2fr) minmax(125px,.8fr) minmax(150px,1fr) auto;gap:8px;align-items:end}.condition-row label{display:grid;gap:4px;font-size:.75rem;color:var(--secondary-text-color)}
         main{padding:18px}.tab-panel{min-height:360px}.panel-head,.section-title{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}.panel-head h2,.section-title h2{margin:3px 0}.panel-head p{margin:4px 0 0;color:var(--secondary-text-color);max-width:860px}.view-meta{display:flex;gap:10px;color:var(--secondary-text-color);font-size:.8rem}.loading-indicator{display:inline-flex;align-items:center;gap:4px}.loading-indicator ha-icon{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
         .metrics{display:grid;grid-template-columns:repeat(7,minmax(125px,1fr));gap:9px;margin-bottom:14px}.metric{display:flex;align-items:center;gap:9px;padding:11px;border-radius:13px;background:var(--secondary-background-color);min-width:0;border-left:3px solid var(--diag-blue)}.metric ha-icon{color:var(--diag-blue)}.metric>div{min-width:0}.metric span{display:block;color:var(--secondary-text-color);font-size:.69rem}.metric strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.88rem;margin-top:2px}.metric.success{border-color:var(--diag-green)}.metric.success ha-icon{color:var(--diag-green)}.metric.error{border-color:var(--diag-red)}.metric.error ha-icon{color:var(--diag-red)}.metric.orange{border-color:var(--diag-orange)}.metric.orange ha-icon{color:var(--diag-orange)}.metric.purple{border-color:var(--diag-purple)}.metric.purple ha-icon{color:var(--diag-purple)}.metric.cyan{border-color:var(--diag-cyan)}.metric.cyan ha-icon{color:var(--diag-cyan)}
-        .overview-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(270px,.8fr);gap:14px;margin-bottom:14px}.surface{padding:16px;border:1px solid var(--divider-color);border-radius:15px;background:var(--secondary-background-color)}.section-title>ha-icon{color:var(--diag-cyan);--mdc-icon-size:30px}.flow{display:flex;align-items:stretch;gap:4px;overflow:auto;padding:5px 0}.flow-step{display:flex;align-items:center;gap:8px;min-width:150px;flex:1;padding:10px;border-radius:12px;background:var(--card-background-color);border:1px solid var(--divider-color)}.flow-step>ha-icon{margin-left:auto;color:var(--secondary-text-color)}.flow-step div{min-width:0}.flow-step strong,.flow-step small{display:block}.flow-step small{color:var(--secondary-text-color);margin-top:3px;font-size:.73rem}.flow-index{display:flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:50%;background:var(--diag-blue);color:#fff;font-weight:700;flex:0 0 25px}.flow-step.confirmed .flow-index,.flow-step.success .flow-index{background:var(--diag-green)}.flow-step.blocked .flow-index{background:var(--diag-yellow)}.definition-list,.detail-section dl,.action-card dl,.external-card dl,.anomaly-card dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 12px;margin:0}.definition-list dt,.detail-section dt,.action-card dt,.external-card dt,.anomaly-card dt{font-size:.75rem;color:var(--secondary-text-color)}.definition-list dd,.detail-section dd,.action-card dd,.external-card dd,.anomaly-card dd{margin:0;overflow-wrap:anywhere}.compact-events{display:grid;gap:5px}.compact-event{display:grid;grid-template-columns:auto auto minmax(180px,1fr) minmax(100px,.5fr) auto;align-items:center;text-align:left;gap:9px;background:var(--card-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}.compact-event time,.compact-event small{font-size:.74rem;color:var(--secondary-text-color)}.severity-dot{width:8px;height:8px;border-radius:50%;background:var(--diag-blue)}.severity-dot.warning{background:var(--diag-yellow)}.severity-dot.error,.severity-dot.critical{background:var(--diag-red)}.severity-dot.success{background:var(--diag-green)}
-        .table-wrap{overflow:auto;border:1px solid var(--divider-color);border-radius:14px}.event-table,.comparison-table{border-collapse:collapse;width:100%;min-width:1450px}.event-table thead,.comparison-table thead{position:sticky;top:0;z-index:2;background:var(--card-background-color)}.event-table th,.event-table td,.comparison-table th,.comparison-table td{padding:10px;border-bottom:1px solid var(--divider-color);text-align:left;vertical-align:top;font-size:.78rem}.event-table tbody tr{cursor:pointer}.event-table tbody tr:hover{background:color-mix(in srgb,var(--diag-cyan) 7%,transparent)}.event-table tr.anomaly{box-shadow:inset 4px 0 0 var(--diag-red)}.event-table tr.external{background:color-mix(in srgb,var(--diag-cyan) 4%,transparent)}.event-table strong,.event-table small{display:block}.event-table small{margin-top:3px;color:var(--secondary-text-color)}code{font-family:var(--code-font-family,monospace);font-size:.76rem;overflow-wrap:anywhere;color:var(--primary-text-color)}
+        .overview-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(270px,.8fr);gap:14px;margin-bottom:14px;align-items:start}.surface{padding:16px;border:1px solid var(--divider-color);border-radius:15px;background:var(--secondary-background-color);min-width:0}.flow-surface{min-width:0}.section-title>ha-icon{color:var(--diag-cyan);--mdc-icon-size:30px}.section-subtitle{margin:5px 0 0;color:var(--secondary-text-color);font-size:.78rem;line-height:1.4}.flow{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:7px;overflow:auto;padding:5px 0;scrollbar-width:thin}.flow-step{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;min-width:0;min-height:82px;max-height:104px;overflow:hidden;padding:10px;border-radius:12px;background:var(--card-background-color);border:1px solid var(--divider-color)}.flow-step>ha-icon{color:var(--secondary-text-color);flex:0 0 auto}.flow-step div{min-width:0;overflow:hidden}.flow-step strong,.flow-step small{display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.flow-step strong{-webkit-line-clamp:2;line-clamp:2}.flow-step small{-webkit-line-clamp:2;line-clamp:2;color:var(--secondary-text-color);margin-top:3px;font-size:.73rem;line-height:1.35}.flow-index{display:flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:50%;background:var(--diag-blue);color:#fff;font-weight:700;flex:0 0 25px}.flow-step.confirmed .flow-index,.flow-step.success .flow-index{background:var(--diag-green)}.flow-step.blocked .flow-index{background:var(--diag-yellow)}.definition-list,.detail-section dl,.action-card dl,.external-card dl,.anomaly-card dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 12px;margin:0}.definition-list dt,.detail-section dt,.action-card dt,.external-card dt,.anomaly-card dt{font-size:.75rem;color:var(--secondary-text-color)}.definition-list dd,.detail-section dd,.action-card dd,.external-card dd,.anomaly-card dd{margin:0;overflow-wrap:anywhere;line-height:1.4}.compact-events{display:grid;gap:5px}.compact-event{display:grid;grid-template-columns:auto auto minmax(180px,1fr) minmax(100px,.5fr) auto;align-items:center;text-align:left;gap:9px;background:var(--card-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}.compact-event time,.compact-event small{font-size:.74rem;color:var(--secondary-text-color)}.severity-dot{width:8px;height:8px;border-radius:50%;background:var(--diag-blue)}.severity-dot.warning{background:var(--diag-yellow)}.severity-dot.error,.severity-dot.critical{background:var(--diag-red)}.severity-dot.success{background:var(--diag-green)}
+        .table-wrap{overflow:auto;border:1px solid var(--divider-color);border-radius:14px}.event-table,.comparison-table{border-collapse:collapse;width:100%}.event-table{min-width:1450px}.event-table thead,.comparison-table thead{position:sticky;top:0;z-index:2;background:var(--card-background-color)}.event-table th,.event-table td,.comparison-table th,.comparison-table td{padding:10px;border-bottom:1px solid var(--divider-color);text-align:left;vertical-align:top;font-size:.78rem}.event-table tbody tr{cursor:pointer}.event-table tbody tr:hover{background:color-mix(in srgb,var(--diag-cyan) 7%,transparent)}.event-table tr.anomaly{box-shadow:inset 4px 0 0 var(--diag-red)}.event-table tr.external{background:color-mix(in srgb,var(--diag-cyan) 4%,transparent)}.event-table strong,.event-table small{display:block}.event-table small{margin-top:3px;color:var(--secondary-text-color)}code{font-family:var(--code-font-family,monospace);font-size:.76rem;overflow-wrap:anywhere;color:var(--primary-text-color)}
         :host([data-density="compact"]) .event-table th,:host([data-density="compact"]) .event-table td{padding:6px 8px;font-size:.73rem}:host([data-density="compact"]) .decision-card,:host([data-density="compact"]) .action-card,:host([data-density="compact"]) .state-change-card,:host([data-density="compact"]) .external-card,:host([data-density="compact"]) .observation-card{padding:10px!important}
         .chip-row{display:flex;gap:5px;flex-wrap:wrap}.chip{display:inline-flex;align-items:center;border-radius:999px;padding:3px 7px;font-size:.68rem;background:var(--secondary-background-color);border:1px solid var(--divider-color);white-space:nowrap}.chip.severity.value-warning{color:var(--diag-yellow);border-color:var(--diag-yellow)}.chip.severity.value-error,.chip.severity.value-critical{color:var(--diag-red);border-color:var(--diag-red)}.chip.severity.value-success{color:var(--diag-green);border-color:var(--diag-green)}.chip.audibility.value-audible_expected{color:var(--diag-orange);border-color:var(--diag-orange)}.chip.audibility.value-silent_expected,.chip.origin{color:var(--diag-cyan);border-color:color-mix(in srgb,var(--diag-cyan) 60%,var(--divider-color))}.chip.outcome.value-confirmed,.chip.outcome.value-success,.chip.outcome.value-resolved{color:var(--diag-green);border-color:var(--diag-green)}.chip.outcome.value-blocked,.chip.outcome.value-suppressed,.chip.outcome.value-acknowledged{color:var(--diag-yellow);border-color:var(--diag-yellow)}.chip.outcome.value-failed,.chip.outcome.value-error{color:var(--diag-red);border-color:var(--diag-red)}.chip.category,.chip.field{color:var(--diag-purple);border-color:color-mix(in srgb,var(--diag-purple) 55%,var(--divider-color))}
         .pagination{display:flex;justify-content:center;align-items:end;gap:7px;flex-wrap:wrap;margin:14px 0}.pagination label{display:grid;gap:3px;color:var(--secondary-text-color);font-size:.7rem}.pagination input{min-height:40px}.empty-state{min-height:180px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:9px;color:var(--secondary-text-color);padding:28px;text-align:center}.empty-state ha-icon{--mdc-icon-size:34px}
@@ -2786,11 +2886,11 @@
         .statistics-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.stat-summary{grid-column:1/-1}.stat-card h3{margin-top:0}.stat-summary-grid{display:grid;grid-template-columns:repeat(7,minmax(100px,1fr));gap:8px}.stat-summary-grid>div{padding:9px;border-radius:10px;background:var(--card-background-color)}.stat-summary-grid span,.stat-summary-grid strong{display:block}.stat-summary-grid span{font-size:.7rem;color:var(--secondary-text-color)}.stat-summary-grid strong{font-size:1.2rem;margin-top:3px}.bars{display:grid;gap:7px}.bar-row{display:grid;grid-template-columns:minmax(90px,1fr) minmax(80px,2fr) auto;gap:7px;align-items:center;font-size:.75rem}.bar-row>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bar-row>div{height:8px;border-radius:999px;background:var(--card-background-color);overflow:hidden}.bar-row i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--diag-blue),var(--diag-cyan))}.empty-small{padding:14px;color:var(--secondary-text-color);text-align:center}
         .settings-head{position:sticky;top:0;background:var(--card-background-color);z-index:6;padding:6px 0}.dirty-chip{padding:5px 9px;border-radius:999px;background:color-mix(in srgb,var(--diag-yellow) 18%,var(--secondary-background-color));color:var(--diag-yellow);font-size:.76rem}.settings-form details{border:1px solid var(--divider-color);border-radius:14px;padding:0 14px 14px;margin-bottom:10px;background:var(--secondary-background-color)}.toggle-grid{display:grid;grid-template-columns:repeat(3,minmax(170px,1fr));gap:8px}.full{grid-column:1/-1}.maintenance-grid{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 14px;margin-bottom:12px}.maintenance-grid dt{color:var(--secondary-text-color);font-size:.75rem}.maintenance-grid dd{margin:0;overflow-wrap:anywhere}.maintenance-actions{margin-top:10px}.sticky-form-actions{display:flex;justify-content:flex-end;gap:8px;position:sticky;bottom:0;padding:12px;background:color-mix(in srgb,var(--card-background-color) 94%,transparent);border-top:1px solid var(--divider-color);z-index:5}
         .export-layout{display:grid;grid-template-columns:minmax(280px,1fr) minmax(250px,.7fr);gap:14px}.export-form{display:grid;gap:12px}.privacy-note{display:flex;gap:12px;align-items:flex-start}.privacy-note>ha-icon{color:var(--diag-green);--mdc-icon-size:36px}.privacy-note h3{margin:0}.privacy-note p{color:var(--secondary-text-color);line-height:1.5}
-        dialog{border:0;border-radius:18px;background:var(--card-background-color);color:var(--primary-text-color);padding:0;box-shadow:0 22px 90px rgba(0,0,0,.48);max-height:94vh;max-width:calc(100vw - 20px)}dialog::backdrop{background:rgba(0,0,0,.58)}dialog:not(.wide-dialog){width:min(560px,calc(100vw - 20px))}.wide-dialog{width:min(1220px,calc(100vw - 20px))}.dialog-shell{padding:18px;display:grid;gap:13px;min-width:0}.dialog-shell>header,.dialog-shell>footer{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.dialog-shell>header{position:sticky;top:-18px;background:var(--card-background-color);z-index:6;padding:2px 0 10px;border-bottom:1px solid var(--divider-color)}.dialog-shell h2{margin:3px 0}.dialog-shell>footer{justify-content:flex-end}.detail-tabs{display:flex;gap:5px;overflow:auto;border-bottom:1px solid var(--divider-color);padding-bottom:7px}.detail-tabs button{background:transparent;color:var(--secondary-text-color);white-space:nowrap}.detail-tabs button.active{background:color-mix(in srgb,var(--diag-cyan) 15%,var(--secondary-background-color));color:var(--primary-text-color)}.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.detail-section{border:1px solid var(--divider-color);border-radius:12px;padding:12px}.detail-section h3{margin:0 0 9px}.comparison-table{min-width:850px}.comparison-table tr.changed{box-shadow:inset 3px 0 0 var(--diag-cyan)}.comparison-table tr.unchanged{color:var(--secondary-text-color)}.comparison-wrap{margin:10px 0}.json-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.json-columns h4{margin:0 0 5px}.technical-sections details{border-bottom:1px solid var(--divider-color)}.technical-sections summary,details>summary{cursor:pointer;font-weight:700;padding:10px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:430px;overflow:auto;padding:11px;border-radius:10px;background:var(--code-editor-background-color,var(--secondary-background-color));font-size:.76rem}.related-events{display:grid;gap:6px;margin-top:10px}.related-event{display:grid;grid-template-columns:auto minmax(160px,1fr) auto;text-align:left}.related-event time,.related-event span{font-size:.73rem;color:var(--secondary-text-color)}
-        :host([data-detail-mode="panel"]) #event-dialog{position:fixed;inset:0 0 0 auto;margin:0;width:min(920px,96vw);height:100dvh;max-height:none;border-radius:18px 0 0 18px;z-index:1000}:host([data-detail-mode="panel"]) #event-dialog .dialog-shell{min-height:100%}
+        dialog{border:0;border-radius:18px;background:var(--card-background-color);color:var(--primary-text-color);padding:0;box-shadow:0 22px 90px rgba(0,0,0,.48);max-height:94vh;max-width:calc(100vw - 20px)}dialog::backdrop{background:rgba(0,0,0,.58)}dialog:not(.wide-dialog){width:min(560px,calc(100vw - 20px))}.wide-dialog{width:min(1220px,calc(100vw - 20px))}.dialog-shell{padding:18px;display:grid;gap:13px;min-width:0}.dialog-shell>header,.dialog-shell>footer{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.dialog-shell>header{position:sticky;top:-18px;background:var(--card-background-color);z-index:6;padding:2px 0 10px;border-bottom:1px solid var(--divider-color)}.dialog-shell>header>div{min-width:0}.dialog-shell>header .icon-button{flex:0 0 40px}.dialog-shell h2{margin:3px 0;overflow-wrap:anywhere}.dialog-shell>footer{justify-content:flex-end}#event-dialog{overflow:hidden}#event-dialog .dialog-shell{height:min(90vh,900px);display:flex;flex-direction:column;overflow:hidden}#event-dialog .dialog-shell>header{position:relative;top:auto;flex:0 0 auto}#event-dialog #detail-loading{flex:1 1 auto;min-height:0}#event-dialog #detail-content{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;padding-right:2px}.detail-tabs{display:flex;flex:0 0 auto;align-items:center;gap:5px;overflow:auto;border-bottom:1px solid var(--divider-color);padding-bottom:7px}.detail-tabs button{flex:0 0 auto;align-self:center;background:transparent;color:var(--secondary-text-color);white-space:nowrap}.detail-tabs button.active{background:color-mix(in srgb,var(--diag-cyan) 15%,var(--secondary-background-color));color:var(--primary-text-color)}.detail-panels{min-width:0}.detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.detail-section{border:1px solid var(--divider-color);border-radius:12px;padding:12px;min-width:0}.detail-section h3{margin:0 0 9px}.comparison-table{min-width:0;table-layout:fixed}.comparison-table th:first-child{width:18%}.comparison-table th:nth-child(2),.comparison-table th:nth-child(3){width:33%}.comparison-table th:last-child{width:16%}.comparison-table tr.changed{box-shadow:inset 3px 0 0 var(--diag-cyan)}.comparison-table tr.unchanged{color:var(--secondary-text-color)}.comparison-wrap{margin:10px 0;overflow-x:hidden}.comparison-value{display:block;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;line-height:1.4}.json-columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:9px}.json-columns h4{margin:0 0 5px}.technical-sections details{border-bottom:1px solid var(--divider-color)}.technical-sections summary,details>summary{cursor:pointer;font-weight:700;padding:10px 0}.detail-empty{margin:0 0 10px;padding:11px;border-radius:10px;background:var(--secondary-background-color);color:var(--secondary-text-color);line-height:1.45}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:430px;overflow:auto;padding:11px;border-radius:10px;background:var(--code-editor-background-color,var(--secondary-background-color));font-size:.76rem}.related-events{display:grid;gap:6px;margin-top:10px}.related-event{display:grid;grid-template-columns:auto minmax(160px,1fr) auto;text-align:left}.related-event time,.related-event span{font-size:.73rem;color:var(--secondary-text-color)}
+        :host([data-detail-mode="panel"]) #event-dialog{position:fixed;inset:0 0 0 auto;margin:0;width:min(920px,100vw);height:100dvh;max-height:none;max-width:100vw;border-radius:18px 0 0 18px;overflow:hidden}:host([data-detail-mode="panel"]) #event-dialog::backdrop{background:rgba(0,0,0,.22)}:host([data-detail-mode="panel"]) #event-dialog .dialog-shell{height:100%;min-height:0}
         @container(max-width:1180px){.metrics{grid-template-columns:repeat(4,minmax(125px,1fr))}.filter-grid,.settings-grid{grid-template-columns:repeat(3,minmax(150px,1fr))}.statistics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-summary-grid{grid-template-columns:repeat(4,1fr)}}
         @container(max-width:820px){.hero{display:block}.hero-actions{margin-top:14px}.query-toolbar{grid-template-columns:minmax(0,1fr) auto}.saved-select,.query-toolbar>.icon-button{display:none}.filter-grid,.settings-grid{grid-template-columns:repeat(2,minmax(140px,1fr))}.metrics{grid-template-columns:repeat(3,minmax(110px,1fr))}.overview-layout,.export-layout{grid-template-columns:1fr}.decision-grid,.action-grid,.anomaly-grid,.statistics-grid{grid-template-columns:1fr}.stat-summary-grid{grid-template-columns:repeat(3,1fr)}.external-card{grid-template-columns:auto minmax(0,1fr)}.external-card>button{grid-column:2}.observation-card{grid-template-columns:auto minmax(0,1fr)}.observation-actions{grid-column:2;display:flex}.toggle-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}.json-columns{grid-template-columns:1fr}.detail-grid{grid-template-columns:1fr}}
-        @container(max-width:560px){main{padding:10px}.hero{padding:16px}.tabs{padding:8px}.tab span{display:none}.tab{padding:8px}.query-toolbar{padding:10px;grid-template-columns:1fr}.query-toolbar>button{width:100%}.quick-filters{padding:4px 10px 10px}.filter-panel{margin:0 10px 12px}.filter-panel-head,.filter-footer{display:block}.filter-panel-head .button-row,.filter-footer .button-row{margin-top:10px}.filter-grid,.settings-grid,.toggle-grid{grid-template-columns:1fr}.condition-row{grid-template-columns:1fr auto}.condition-row label{grid-column:1}.condition-row button{grid-column:2;grid-row:1}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metric{padding:9px}.flow-step{min-width:140px}.compact-event{grid-template-columns:auto auto minmax(140px,1fr) auto}.compact-event small{display:none}.decision-columns{grid-template-columns:1fr}.before-after{grid-template-columns:1fr}.before-after>ha-icon{transform:rotate(90deg);justify-self:center}.external-card,.observation-card{grid-template-columns:1fr}.external-icon{display:none}.external-card>button,.observation-actions{grid-column:1}.stat-summary-grid{grid-template-columns:repeat(2,1fr)}.pagination{display:grid;grid-template-columns:1fr 1fr}.pagination label{grid-column:1/-1}.panel-head{display:block}.panel-head>.button-row,.view-meta{margin-top:10px}.detail-tabs button{font-size:.75rem;padding:8px}.dialog-shell{padding:13px}.related-event{grid-template-columns:1fr}.sticky-form-actions{flex-wrap:wrap}.sticky-form-actions button{flex:1}.hero-actions button{width:100%}}
+        @container(max-width:560px){main{padding:10px}.hero{padding:16px}.tabs{padding:8px}.tab span{display:none}.tab{padding:8px}.query-toolbar{padding:10px;grid-template-columns:1fr}.query-toolbar>button{width:100%}.quick-filters{padding:4px 10px 10px}.filter-panel{margin:0 10px 12px}.filter-panel-head,.filter-footer{display:block}.filter-panel-head .button-row,.filter-footer .button-row{margin-top:10px}.filter-grid,.settings-grid,.toggle-grid{grid-template-columns:1fr}.condition-row{grid-template-columns:1fr auto}.condition-row label{grid-column:1}.condition-row button{grid-column:2;grid-row:1}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metric{padding:9px}.flow{grid-template-columns:repeat(5,minmax(180px,1fr))}.flow-step{min-width:180px}.compact-event{grid-template-columns:auto auto minmax(140px,1fr) auto}.compact-event small{display:none}.decision-columns{grid-template-columns:1fr}.before-after{grid-template-columns:1fr}.before-after>ha-icon{transform:rotate(90deg);justify-self:center}.external-card,.observation-card{grid-template-columns:1fr}.external-icon{display:none}.external-card>button,.observation-actions{grid-column:1}.stat-summary-grid{grid-template-columns:repeat(2,1fr)}.pagination{display:grid;grid-template-columns:1fr 1fr}.pagination label{grid-column:1/-1}.panel-head{display:block}.panel-head>.button-row,.view-meta{margin-top:10px}.detail-tabs button{font-size:.75rem;padding:8px}.dialog-shell{padding:13px}.comparison-wrap{overflow-x:auto}.comparison-table{min-width:620px}.related-event{grid-template-columns:1fr}.sticky-form-actions{flex-wrap:wrap}.sticky-form-actions button{flex:1}.hero-actions button{width:100%}}
         @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
       `;
     }

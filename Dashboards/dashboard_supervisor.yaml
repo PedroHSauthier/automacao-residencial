@@ -1087,7 +1087,7 @@ views:
     dense_section_placement: false
   - title: Diagnóstico
     path: diagnostico
-    icon: mdi:timeline-search
+    icon: mdi:stethoscope
     type: sections
     sections:
       - type: grid

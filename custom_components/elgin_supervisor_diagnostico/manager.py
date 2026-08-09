@@ -1878,21 +1878,25 @@ class DiagnosticManager:
             return current.attributes.get(name) if current is not None else None
 
         treatment = state("input_select.elgin_supervisor_tratamento_ativo")
-        treatment_suffix = {
-            "Aquecimento": "aquecimento",
-            "Refrigeração": "refrigeracao",
-            "Desumidificação": "desumidificacao",
-        }.get(treatment)
-        preset = (
-            state(f"sensor.elgin_supervisor_preset_efetivo_de_condicao_do_{treatment_suffix}")
-            if treatment_suffix
-            else None
+        effective_entities = {
+            "Aquecimento": (
+                "sensor.elgin_supervisor_preset_efetivo_de_condicao_do_aquecimento",
+                "sensor.elgin_supervisor_potencia_efetiva_de_aquecimento",
+            ),
+            "Refrigeração": (
+                "sensor.elgin_supervisor_preset_efetivo_de_condicao_da_refrigeracao",
+                "sensor.elgin_supervisor_potencia_efetiva_de_refrigeracao",
+            ),
+            "Desumidificação": (
+                "sensor.elgin_supervisor_preset_efetivo_de_condicao_da_desumidificacao",
+                "sensor.elgin_supervisor_potencia_efetiva_de_desumidificacao",
+            ),
+        }
+        preset_entity_id, power_entity_id = effective_entities.get(
+            treatment, (None, None)
         )
-        power_profile = (
-            state(f"sensor.elgin_supervisor_potencia_efetiva_de_{treatment_suffix}")
-            if treatment_suffix
-            else None
-        )
+        preset = state(preset_entity_id) if preset_entity_id else None
+        power_profile = state(power_entity_id) if power_entity_id else None
         enabled = state("input_boolean.elgin_supervisor_habilitado")
         active_protections = [
             label
@@ -1909,9 +1913,8 @@ class DiagnosticManager:
                 "Habilitado" if enabled == "on" else "Desabilitado" if enabled == "off" else "Indisponível"
             ),
             "treatment": treatment,
-            "physical_mode": attribute(
-                "sensor.elgin_supervisor_estado_fisico_observado", "mode_normalizado"
-            ),
+            "physical_mode": state("sensor.elgin_supervisor_estado_fisico_observado"),
+            "effective_configuration_applicable": treatment in effective_entities,
             "preset": preset,
             "power_profile": power_profile,
             "agenda": attribute("sensor.elgin_supervisor_agenda_politica", "global_action")

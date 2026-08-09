@@ -9,7 +9,7 @@ from homeassistant.const import Platform
 
 DOMAIN: Final = "elgin_supervisor_diagnostico"
 NAME: Final = "Elgin Supervisor — Diagnóstico"
-VERSION: Final = "1.0.0"
+VERSION: Final = "1.0.2"
 
 PLATFORMS: Final = (
     Platform.SENSOR,

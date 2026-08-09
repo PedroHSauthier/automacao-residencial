@@ -6,7 +6,6 @@ import ast
 import hashlib
 import json
 from pathlib import Path
-import subprocess
 import unittest
 
 import yaml
@@ -50,13 +49,6 @@ class StaticContractTests(unittest.TestCase):
             (REPOSITORY / "packages/elgin_supervisor_climatico.yaml").read_text(),
             Loader=HALoader,
         )
-        baseline_text = subprocess.check_output(
-            ["git", "show", "HEAD:packages/elgin_supervisor_climatico.yaml"],
-            cwd=REPOSITORY,
-            text=True,
-        )
-        baseline = yaml.load(baseline_text, Loader=HALoader)
-
         def without_diagnostics(value):
             if isinstance(value, list):
                 return [
@@ -76,7 +68,17 @@ class StaticContractTests(unittest.TestCase):
                 }
             return value
 
-        self.assertEqual(baseline, without_diagnostics(current))
+        normalized = without_diagnostics(current)
+        canonical = json.dumps(
+            normalized,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        self.assertEqual(
+            "24a819d0aadb822fa27ec318a95799155c0feb25395606a90d0002465db0a855",
+            hashlib.sha256(canonical.encode()).hexdigest(),
+        )
 
     def test_websocket_uses_current_schema_and_admin_contract(self) -> None:
         source = (COMPONENT / "websocket.py").read_text()
@@ -136,6 +138,22 @@ class StaticContractTests(unittest.TestCase):
         self.assertIn("await self.anomaly.async_stop()", manager)
         self.assertIn("await self.anomaly.async_apply_settings()", manager)
         self.assertIn("await runtime.manager.anomaly.async_apply_settings()", initializer)
+
+    def test_panorama_reads_canonical_supervisor_entities(self) -> None:
+        manager = (COMPONENT / "manager.py").read_text()
+        self.assertIn(
+            '"sensor.elgin_supervisor_estado_fisico_observado"', manager
+        )
+        self.assertNotIn('"mode_normalizado"', manager)
+        for entity_id in (
+            "sensor.elgin_supervisor_preset_efetivo_de_condicao_do_aquecimento",
+            "sensor.elgin_supervisor_preset_efetivo_de_condicao_da_refrigeracao",
+            "sensor.elgin_supervisor_preset_efetivo_de_condicao_da_desumidificacao",
+            "sensor.elgin_supervisor_potencia_efetiva_de_aquecimento",
+            "sensor.elgin_supervisor_potencia_efetiva_de_refrigeracao",
+            "sensor.elgin_supervisor_potencia_efetiva_de_desumidificacao",
+        ):
+            self.assertIn(f'"{entity_id}"', manager)
 
     def test_diagnostic_failure_cannot_call_climate_or_esphome(self) -> None:
         service_call_files = [
