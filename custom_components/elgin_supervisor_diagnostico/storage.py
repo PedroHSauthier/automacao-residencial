@@ -6,6 +6,7 @@ import asyncio
 from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -17,6 +18,13 @@ import threading
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, TypeVar
 
 from .const import DB_FILENAME, LEGACY_FALLBACK_FILENAME, SCHEMA_VERSION
+from .migrations import (
+    INVALID_POWER_PROFILE_TOKENS,
+    is_unprotected_routine_event,
+    migrate_event_semantics_v6,
+    normalize_power_level,
+    normalize_power_profile,
+)
 from .query import (
     compile_event_predicate,
     compile_event_query,
@@ -94,6 +102,7 @@ EVENT_COLUMNS = (
     "treatment",
     "preset",
     "power_profile",
+    "power_level",
     "agenda_state",
     "protection",
     "function",
@@ -221,6 +230,7 @@ def _event_fingerprint(data: Mapping[str, Any]) -> str:
         "treatment": data.get("treatment"),
         "preset": data.get("preset"),
         "power_profile": data.get("power_profile"),
+        "power_level": data.get("power_level"),
         "agenda_state": data.get("agenda_state"),
         "protection": data.get("protection"),
         "function": data.get("function"),
@@ -234,7 +244,13 @@ def _event_row(data: Mapping[str, Any]) -> tuple[Any, ...]:
     values: list[Any] = []
     for column in EVENT_COLUMNS:
         value = data.get(column)
-        if column in JSON_COLUMNS:
+        if column == "severity" and value == "info" and is_unprotected_routine_event(data):
+            value = "debug"
+        elif column == "power_profile":
+            value = normalize_power_profile(value)
+        elif column == "power_level":
+            value = normalize_power_level(value)
+        elif column in JSON_COLUMNS:
             value = _json_dump(value)
         elif column in {"is_external", "is_anomaly"}:
             value = int(bool(value))
@@ -266,6 +282,104 @@ def _event_dict(row: sqlite3.Row, *, include_details: bool = True) -> dict[str, 
         for column in ("before_json", "after_json", "diff_json", "desired_json", "confirmed_json", "details_json"):
             result.pop(column, None)
     return result
+
+
+_FACET_FILTER_KEYS: dict[str, frozenset[str]] = {
+    "category": frozenset({"category", "categories"}),
+    "event_type": frozenset({"event_type", "event_types"}),
+    "severity": frozenset({"severity", "severities"}),
+    "outcome": frozenset({"outcome", "outcomes"}),
+    "actor": frozenset({"actor", "actors"}),
+    "user": frozenset({"user", "users", "user_id", "user_ids"}),
+    "origin": frozenset({"origin", "origins"}),
+    "entity_id": frozenset({"entity", "entities", "entity_id", "entity_ids"}),
+    "domain": frozenset({"domain", "domains"}),
+    "mode": frozenset({"mode", "modes"}),
+    "treatment": frozenset({"treatment", "treatments"}),
+    "preset": frozenset({"preset", "presets"}),
+    "power": frozenset({"power", "powers", "power_profile", "power_profiles"}),
+    "agenda": frozenset({"agenda", "agendas"}),
+    "protection": frozenset({"protection", "protections"}),
+    "audibility": frozenset({"audibility", "audibilities"}),
+    "anomaly_type": frozenset({"anomaly_type", "anomaly_types"}),
+    "function": frozenset({"function", "functions"}),
+    "activation_model": frozenset({"activation_model", "activation_models"}),
+    "changed_fields": frozenset(
+        {"changed_field", "changed_fields", "fields_changed"}
+    ),
+}
+
+_FACET_ADVANCED_FIELDS: dict[str, frozenset[str]] = {
+    **{
+        name: keys
+        for name, keys in _FACET_FILTER_KEYS.items()
+    },
+    "actor": frozenset({"actor", "actor_name"}),
+    "user": frozenset({"user", "user_name", "user_id"}),
+    "origin": frozenset({"origin", "origin_class"}),
+    "entity_id": frozenset({"entity", "entity_id"}),
+    "power": frozenset({"power", "power_profile"}),
+    "changed_fields": frozenset(
+        {"changed_field", "changed_fields_all", "changed_fields_relevant"}
+    ),
+}
+
+
+def _strip_advanced_facet(value: Any, facet: str) -> Any:
+    if not isinstance(value, Mapping):
+        return deepcopy(value)
+    fields = _FACET_ADVANCED_FIELDS.get(facet, frozenset())
+    if value.get("field") in fields:
+        return None
+    result = dict(value)
+    child_key = "conditions" if "conditions" in value else "children" if "children" in value else None
+    if child_key:
+        children = [
+            stripped
+            for item in value.get(child_key, [])
+            if (stripped := _strip_advanced_facet(item, facet)) is not None
+        ]
+        if not children:
+            return None
+        result[child_key] = children
+    return result
+
+
+def filters_without_facet(filters: Mapping[str, Any], facet: str) -> dict[str, Any]:
+    """Return the disjunctive-facet scope (all filters except itself)."""
+
+    excluded = _FACET_FILTER_KEYS.get(facet, frozenset())
+    result = {
+        key: deepcopy(value)
+        for key, value in filters.items()
+        if key not in excluded and key != "advanced"
+    }
+    advanced = _strip_advanced_facet(filters.get("advanced"), facet)
+    if advanced is not None:
+        result["advanced"] = advanced
+    return result
+
+
+def _selected_facet_values(filters: Mapping[str, Any], facet: str) -> set[str]:
+    fields = _FACET_ADVANCED_FIELDS.get(facet, frozenset())
+    values: set[str] = set()
+    for key in _FACET_FILTER_KEYS.get(facet, frozenset()):
+        raw = filters.get(key)
+        candidates = raw if isinstance(raw, (list, tuple, set, frozenset)) else [raw]
+        values.update(str(item) for item in candidates if item not in (None, ""))
+
+    def visit(value: Any) -> None:
+        if not isinstance(value, Mapping):
+            return
+        if value.get("field") in fields:
+            raw = value.get("value")
+            candidates = raw if isinstance(raw, (list, tuple, set, frozenset)) else [raw]
+            values.update(str(item) for item in candidates if item not in (None, ""))
+        for item in value.get("conditions", value.get("children", [])):
+            visit(item)
+
+    visit(filters.get("advanced"))
+    return values
 
 
 class DiagnosticStorage:
@@ -312,6 +426,7 @@ class DiagnosticStorage:
         self._last_failure: str | None = None
         self._last_cleanup: str | None = None
         self._last_migration: str | None = None
+        self._semantic_migration: dict[str, Any] = {}
         self._opened_at: datetime | None = None
         self._last_backup: str | None = None
         self._last_write_latency_ms = 0.0
@@ -477,6 +592,7 @@ class DiagnosticStorage:
                 treatment TEXT,
                 preset TEXT,
                 power_profile TEXT,
+                power_level REAL,
                 agenda_state TEXT,
                 protection TEXT,
                 function TEXT,
@@ -514,6 +630,7 @@ class DiagnosticStorage:
             "trigger_model": "TEXT",
             "preset": "TEXT",
             "power_profile": "TEXT",
+            "power_level": "REAL",
             "agenda_state": "TEXT",
             "protection": "TEXT",
             "function": "TEXT",
@@ -655,6 +772,7 @@ class DiagnosticStorage:
         }.items():
             if name not in anomaly_columns:
                 connection.execute(f"ALTER TABLE anomalies ADD COLUMN {name} {definition}")
+        self._semantic_migration = migrate_event_semantics_v6(connection)
 
     def _close(self) -> None:
         if self._connection is not None:
@@ -1292,6 +1410,65 @@ class DiagnosticStorage:
             relation["evidence"] = _json_load(relation.pop("evidence_json", None), [])
         return {"correlation_id": correlation_id, "events": events, "relations": relations}
 
+    async def async_get_latest_operational_correlation(self) -> dict[str, Any]:
+        return await self._run(self._get_latest_operational_correlation)
+
+    def _get_latest_operational_correlation(self) -> dict[str, Any]:
+        """Load the newest correlation anchored by a decision/action/result."""
+
+        connection = self._require_connection()
+        operational = """
+            (
+                e.category IN ('decision','action','transmission','external','error')
+                OR e.event_type IN (
+                    'evaluation.no_change','evaluation.completed',
+                    'transmission.confirmation_timeout'
+                )
+                OR e.event_type LIKE 'localtuya.confirmed%'
+                OR e.is_external=1
+            )
+        """
+        anchor = connection.execute(
+            "SELECT e.correlation_id,MAX(e.occurred_at) AS anchor_occurred_at "
+            "FROM events AS e WHERE e.correlation_id IS NOT NULL "
+            "AND e.correlation_id<>'' AND "
+            f"{operational} GROUP BY e.correlation_id "
+            "ORDER BY anchor_occurred_at DESC,e.correlation_id DESC LIMIT 1"
+        ).fetchone()
+        if not anchor:
+            return {
+                "correlation_id": None,
+                "anchor_occurred_at": None,
+                "events": [],
+            }
+        correlation_id = str(anchor["correlation_id"])
+        # Keep the most recent evidence (including the terminal result) while
+        # explicitly retaining the first trigger if a very noisy correlation
+        # exceeds the defensive bound.
+        recent_rows = connection.execute(
+            "SELECT * FROM events WHERE correlation_id=? "
+            "ORDER BY occurred_at DESC,event_id DESC LIMIT 999",
+            (correlation_id,),
+        ).fetchall()
+        first_trigger = connection.execute(
+            "SELECT * FROM events WHERE correlation_id=? "
+            "AND event_type IN ('evaluation.triggered','supervisor.trigger_received') "
+            "ORDER BY occurred_at ASC,event_id ASC LIMIT 1",
+            (correlation_id,),
+        ).fetchone()
+        by_id = {str(row["event_id"]): row for row in recent_rows}
+        if first_trigger is not None:
+            by_id[str(first_trigger["event_id"])] = first_trigger
+        ordered = sorted(
+            by_id.values(),
+            key=lambda row: (str(row["occurred_at"]), str(row["event_id"])),
+        )
+        return {
+            "correlation_id": correlation_id,
+            "anchor_occurred_at": str(anchor["anchor_occurred_at"]),
+            "events": [_event_dict(row) for row in ordered],
+        }
+
     def _get_events_for(self, column: str, value: str) -> list[dict[str, Any]]:
         if column not in {"evaluation_id", "correlation_id"}:
             raise ValueError("Coluna de correlação inválida")
@@ -1513,16 +1690,26 @@ class DiagnosticStorage:
             "audibility": "expected_audibility", "anomaly_type": "anomaly_type", "function": "function",
             "activation_model": "trigger_model",
         }
-        where, params = compile_event_predicate(filters)
         for name, column in columns.items():
+            facet_filters = filters_without_facet(filters, name)
+            where, params = compile_event_predicate(facet_filters)
             suffix = " AND" if where else " WHERE"
+            power_guard = ""
+            if name == "power":
+                placeholders = ",".join("?" for _ in INVALID_POWER_PROFILE_TOKENS)
+                power_guard = (
+                    f" AND LOWER(TRIM(CAST(e.{column} AS TEXT))) NOT IN ({placeholders})"
+                    f" AND CAST(e.{column} AS TEXT) GLOB '*[^0-9., -]*'"
+                )
+                params = [*params, *sorted(INVALID_POWER_PROFILE_TOKENS)]
             rows = connection.execute(
                 f"SELECT e.{column} AS value,COUNT(*) AS count FROM events AS e{where}"
-                f"{suffix} e.{column} IS NOT NULL AND e.{column}<>'' GROUP BY e.{column} "
+                f"{suffix} e.{column} IS NOT NULL AND e.{column}<>''{power_guard} "
+                f"GROUP BY e.{column} "
                 "ORDER BY count DESC,value ASC LIMIT 250",
                 params,
             ).fetchall()
-            facets[name] = [
+            options = [
                 {
                     "value": row["value"],
                     "label": self._facet_label(name, str(row["value"])),
@@ -1530,18 +1717,58 @@ class DiagnosticStorage:
                 }
                 for row in rows
             ]
-        change_suffix = " AND" if where else " WHERE"
+            existing_values = {str(item["value"]) for item in options}
+            for selected in sorted(_selected_facet_values(filters, name)):
+                if selected in existing_values:
+                    continue
+                if name == "power" and (
+                    selected.casefold() in INVALID_POWER_PROFILE_TOKENS
+                    or not any(character.isalpha() for character in selected)
+                ):
+                    continue
+                options.append(
+                    {
+                        "value": selected,
+                        "label": self._facet_label(name, selected),
+                        "count": 0,
+                    }
+                )
+            facets[name] = options
+
+        severity_counts = {
+            str(item["value"]): int(item["count"])
+            for item in facets["severity"]
+        }
+        severity_order = ("debug", "info", "success", "warning", "error", "critical")
+        facets["severity"] = [
+            {
+                "value": value,
+                "label": self._facet_label("severity", value),
+                "count": severity_counts.get(value, 0),
+            }
+            for value in severity_order
+        ]
+
+        changed_filters = filters_without_facet(filters, "changed_fields")
+        changed_where, changed_params = compile_event_predicate(changed_filters)
+        change_suffix = " AND" if changed_where else " WHERE"
         changed_rows = connection.execute(
             "SELECT cf.value AS value,COUNT(*) AS count FROM events AS e "
             "JOIN json_each(COALESCE(e.changed_fields_all,'[]')) AS cf"
-            f"{where}{change_suffix} cf.value IS NOT NULL AND cf.value<>'' "
+            f"{changed_where}{change_suffix} cf.value IS NOT NULL AND cf.value<>'' "
             "GROUP BY cf.value ORDER BY count DESC,value ASC LIMIT 250",
-            params,
+            changed_params,
         ).fetchall()
         facets["changed_fields"] = [
             {"value": row["value"], "label": str(row["value"]), "count": int(row["count"])}
             for row in changed_rows
         ]
+        changed_existing = {str(item["value"]) for item in facets["changed_fields"]}
+        for selected in sorted(_selected_facet_values(filters, "changed_fields")):
+            if selected not in changed_existing:
+                facets["changed_fields"].append(
+                    {"value": selected, "label": selected, "count": 0}
+                )
         aliases = {
             "categories": "category",
             "event_types": "event_type",
@@ -1564,24 +1791,72 @@ class DiagnosticStorage:
         }
         for plural, singular in aliases.items():
             facets[plural] = facets[singular]
-        return {"facets": facets, **{key: facets[key] for key in aliases}}
+        return {
+            "facets": facets,
+            "count_scope": "current_query_without_own_facet",
+            "count_scope_label": "Registros no recorte atual, desconsiderando esta faceta",
+            **{key: facets[key] for key in aliases},
+        }
 
     @staticmethod
     def _facet_label(facet: str, value: str) -> str:
         labels = {
-            "cool": "Refrigeração (Cool)",
-            "heat": "Aquecimento (Heat)",
-            "dry": "Desumidificação (Dry)",
+            "debug": "Rotina",
+            "info": "Informação",
+            "success": "Sucesso",
+            "warning": "Atenção",
+            "error": "Erro",
+            "critical": "Crítico",
+            "cool": "Refrigeração",
+            "heat": "Aquecimento",
+            "dry": "Desumidificação",
             "fan": "Ventilação",
+            "fan_only": "Ventilação",
+            "auto": "Automático",
+            "off": "Desligado",
+            "essential": "Essencial",
+            "normal": "Normal",
+            "intensive": "Intensivo",
+            "decision": "Decisão",
+            "evaluation": "Avaliação",
+            "state": "Estado",
+            "state_import": "Importação de estado",
+            "action": "Ação",
+            "transmission": "Transmissão",
+            "external": "Alteração externa",
+            "observation": "Observação",
+            "user_observation": "Observação do usuário",
+            "anomaly": "Anomalia",
+            "system": "Sistema",
+            "maintenance": "Manutenção",
             "audible_expected": "Audível esperado",
             "silent_expected": "Silencioso esperado",
             "no_transmission": "Sem transmissão IR",
+            "no_ir_transmission": "Sem transmissão IR",
             "external_or_indeterminate": "Externa ou indeterminada",
             "confirmed_by_localtuya": "Confirmado pelo LocalTuya",
+            "started": "Iniciado",
+            "calculated": "Calculado",
+            "unchanged": "Sem mudança",
+            "requested": "Solicitado",
+            "requested_by_ha": "Solicitado pelo Home Assistant",
+            "accepted": "Aceito",
+            "accepted_by_software": "Aceito pelo software",
+            "observed": "Observado",
+            "observed_by_user": "Observado pelo usuário",
+            "confirmed": "Confirmado",
+            "blocked": "Bloqueado",
+            "suppressed": "Suprimido",
+            "failed": "Falhou",
+            "completed": "Concluído",
+            "no_action": "Nenhuma ação",
+            "unknown": "Desconhecido",
         }
         if value in labels:
             return labels[value]
-        return value.replace("_", " ").replace(".", " · ").strip().capitalize()
+        if facet in {"entity_id", "actor", "user"}:
+            return value
+        return value.replace("_", " ").replace(".", " · ").strip()
 
     async def async_get_statistics(self, filters: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return await self._run(self._get_statistics, dict(filters or {}))
@@ -2063,6 +2338,7 @@ class DiagnosticStorage:
             "last_failure": self._last_failure,
             "last_cleanup": self._last_cleanup,
             "last_migration": self._last_migration,
+            "semantic_migration": dict(self._semantic_migration),
             "next_cleanup": next_cleanup.isoformat(),
             "last_backup": self._last_backup,
             "last_write_latency_ms": self._last_write_latency_ms,

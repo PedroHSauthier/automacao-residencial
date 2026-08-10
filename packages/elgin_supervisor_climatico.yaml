@@ -2549,10 +2549,11 @@ script:
           function: full_state
           treatment: "{{ tratamento }}"
           mode: "{{ mode }}"
-          power: "{{ power | bool }}"
+          power_state: "{{ power | bool }}"
           reason: "{{ motivo }}"
           audibility: no_transmission
           desired:
+            power: "{{ power | bool }}"
             signature: "{{ assinatura_ir }}"
             fan: "{{ fan_final }}"
             target_temperature: "{{ target_temperature | int }}"
@@ -2593,10 +2594,11 @@ script:
         function: full_state
         treatment: "{{ tratamento }}"
         mode: "{{ mode }}"
-        power: "{{ power | bool }}"
+        power_state: "{{ power | bool }}"
         reason: "{{ motivo }}"
         audibility: audible_expected
         desired:
+          power: "{{ power | bool }}"
           signature: "{{ assinatura_ir }}"
           localtuya_signature: "{{ assinatura_localtuya_esperada }}"
           fan: "{{ fan_final }}"
@@ -2640,12 +2642,13 @@ script:
         function: full_state
         treatment: "{{ tratamento }}"
         mode: "{{ mode }}"
-        power: "{{ power | bool }}"
+        power_state: "{{ power | bool }}"
         reason: >-
           A action ESPHome retornou sem erro ao Home Assistant; isso não confirma
           emissão física nem recepção pelo aparelho.
         audibility: audible_expected
         desired:
+          power: "{{ power | bool }}"
           signature: "{{ assinatura_ir }}"
     - action: input_text.set_value
       target:
@@ -3037,7 +3040,7 @@ script:
         preset: >-
           {% set chave = {'Aquecimento':'heat','Refrigeração':'cool','Desumidificação':'dry'}.get(desejado) %}
           {{ ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get(chave,{}) or {}).get('effective_name','Nenhum') if chave else 'Nenhum' }}
-        power: "{{ potencia_desejada }}"
+        power_profile: "{{ potencia_desejada }}"
         agenda_action: "{{ agenda_acao }}"
         summary: Avaliação atômica do Supervisor iniciada.
         snapshot: >-
@@ -3147,7 +3150,7 @@ script:
           evaluation_id: "{{ diagnostico_evaluation_id }}"
           treatment: "{{ desejado }}"
           mode: "{{ mode_desejado }}"
-          power: "{{ potencia_desejada }}"
+          power_profile: "{{ potencia_desejada }}"
           protection: atomic_snapshot_integrity
           reason: >-
             Snapshot inconsistente; policy={{ snapshot_policy }}, preset={{ snapshot_preset }},
@@ -3310,7 +3313,7 @@ script:
           preset: >-
             {% set chave = {'Aquecimento':'heat','Refrigeração':'cool','Desumidificação':'dry'}.get(desejado) %}
             {{ ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get(chave,{}) or {}).get('effective_name','Nenhum') if chave else 'Nenhum' }}
-          power: "{{ potencia_desejada }}"
+          power_profile: "{{ potencia_desejada }}"
           agenda_action: "{{ agenda_acao }}"
           protection: shadow_mode
           reason: Modo sombra ativo; decisão calculada, mas nenhuma action climática foi solicitada.
@@ -3388,7 +3391,7 @@ script:
           stage: evaluation_no_change
           evaluation_id: "{{ diagnostico_evaluation_id }}"
           treatment: "{{ tratamento_fisico }}"
-          power: "{{ potencia_fisica_atual }}"
+          power_profile: "{{ potencia_fisica_atual }}"
           protection: preserve_unsupervised_physical_mode
           reason: Estado físico externo não supervisionado preservado; nenhum IR corretivo.
           audibility: no_transmission
@@ -3498,7 +3501,7 @@ script:
           evaluation_id: "{{ diagnostico_evaluation_id }}"
           treatment: "{{ tratamento_fisico }}"
           mode: "{{ mode_atual }}"
-          power: "{{ potencia_fisica_atual }}"
+          power_profile: "{{ potencia_fisica_atual }}"
           protection: preserve_adopted_physical_state
           reason: Estado físico adotado corresponde à política de preservação; nenhum IR corretivo.
           audibility: no_transmission
@@ -3680,7 +3683,7 @@ script:
               preset: >-
                 {% set chave = {'Aquecimento':'heat','Refrigeração':'cool','Desumidificação':'dry'}.get(desejado) %}
                 {{ ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get(chave,{}) or {}).get('effective_name','Nenhum') if chave else 'Nenhum' }}
-              power: "{{ potencia_desejada }}"
+              power_profile: "{{ potencia_desejada }}"
               agenda_action: "{{ agenda_acao }}"
               reason: Configuração desejada difere do estado físico; um estado completo será solicitado.
               audibility: no_transmission
@@ -3720,7 +3723,7 @@ script:
               preset: >-
                 {% set chave = {'Aquecimento':'heat','Refrigeração':'cool','Desumidificação':'dry'}.get(desejado) %}
                 {{ ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get(chave,{}) or {}).get('effective_name','Nenhum') if chave else 'Nenhum' }}
-              power: "{{ potencia_desejada }}"
+              power_profile: "{{ potencia_desejada }}"
               reason: Estado físico e assinatura já correspondem à configuração desejada.
               audibility: no_transmission
           - action: input_select.select_option
@@ -3766,7 +3769,7 @@ script:
             preset: >-
               {% set chave = {'Aquecimento':'heat','Refrigeração':'cool','Desumidificação':'dry'}.get(desejado) %}
               {{ ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get(chave,{}) or {}).get('effective_name','Nenhum') if chave else 'Nenhum' }}
-            power: "{{ potencia_desejada }}"
+            power_profile: "{{ potencia_desejada }}"
             agenda_action: "{{ agenda_acao }}"
             reason: "{{ states('input_text.elgin_supervisor_ultima_decisao') }}"
             audibility: no_transmission

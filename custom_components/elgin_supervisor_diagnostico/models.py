@@ -8,9 +8,14 @@ from enum import StrEnum
 import hashlib
 import json
 import math
-from typing import Any, Self
+from typing import Any, Mapping, Self, Sequence
 from uuid import uuid4
 
+from .migrations import (
+    is_unprotected_routine_event,
+    normalize_power_level,
+    normalize_power_profile,
+)
 from .snapshot import FrozenDict, FrozenList, freeze_json, thaw_json
 
 
@@ -260,6 +265,262 @@ def _fingerprint(payload: dict[str, Any]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+_CRITICAL_EVENT_TYPES = frozenset(
+    {
+        "diagnostic.audit_continuity_lost",
+        "diagnostic.component_unavailable",
+        "diagnostic.persistence_unavailable",
+        "system.critical_component_unavailable",
+    }
+)
+_ERROR_EVENT_TYPES = frozenset(
+    {
+        "diagnostic.persistence_failed",
+        "supervisor.error",
+        "evaluation.failed",
+        "service.failed",
+        "integration.failed",
+    }
+)
+_SUCCESS_EVENT_TYPES = frozenset(
+    {
+        "evaluation.completed",
+        "transmission.accepted_by_software",
+        "transmission.duplicate_suppressed",
+        "localtuya.confirmed_expected_field",
+        "localtuya.confirmed_full_state",
+    }
+)
+_WARNING_EVENT_TYPES = frozenset(
+    {
+        "decision.blocked",
+        "transmission.confirmation_timeout",
+        "localtuya.divergence_or_external",
+        "localtuya.external_or_indeterminate",
+        "localtuya.entity_removed",
+    }
+)
+_PROTECTED_CATEGORIES = frozenset(
+    {"transmission", "external", "error", "observation", "user_observation"}
+)
+
+
+def classify_event_severity(data: Mapping[str, Any]) -> str:
+    """Classify impact from canonical fields without inspecting free text."""
+
+    event_type = str(data.get("event_type") or "").strip().casefold()
+    category = str(data.get("category") or "").strip().casefold()
+    outcome = str(data.get("outcome") or "").strip().casefold()
+    explicit = str(data.get("severity") or Severity.INFO.value).strip().casefold()
+    if explicit not in {item.value for item in Severity}:
+        explicit = Severity.INFO.value
+
+    if event_type in _CRITICAL_EVENT_TYPES:
+        return Severity.CRITICAL.value
+    if event_type in _ERROR_EVENT_TYPES or category == "error":
+        return Severity.ERROR.value
+    if explicit == Severity.CRITICAL.value:
+        return Severity.CRITICAL.value
+    if explicit == Severity.ERROR.value:
+        return Severity.ERROR.value
+    if (
+        event_type in _WARNING_EVENT_TYPES
+        or category == "external"
+        or bool(data.get("is_external"))
+        or outcome in {"blocked", "timeout", "diverged", "diverged_or_external"}
+        or explicit == Severity.WARNING.value
+    ):
+        return Severity.WARNING.value
+    if (
+        event_type in _SUCCESS_EVENT_TYPES
+        or event_type.startswith("localtuya.confirmed")
+        or outcome in {"accepted", "accepted_by_software", "confirmed", "confirmed_by_localtuya", "suppressed"}
+        or explicit == Severity.SUCCESS.value
+    ):
+        return Severity.SUCCESS.value
+
+    audible = str(
+        data.get("expected_audibility", data.get("audibility", "")) or ""
+    ).casefold()
+    protected = bool(
+        category in _PROTECTED_CATEGORIES
+        or data.get("transmission_id")
+        or audible == Audibility.AUDIBLE_EXPECTED.value
+        or event_type.startswith(("transmission.", "localtuya.confirmed", "observation."))
+    )
+    routine = is_unprotected_routine_event(data)
+    if routine and not protected:
+        return Severity.DEBUG.value
+    if protected and explicit == Severity.DEBUG.value:
+        return Severity.INFO.value
+    return explicit
+
+
+FLOW_PHASE_LABELS = {
+    "trigger": "Gatilho recebido",
+    "evaluation": "Supervisor avaliou",
+    "decision": "Decisão calculada ou bloqueada",
+    "action": "Ação ou transmissão",
+    "result": "Resultado observado",
+}
+
+
+def operational_flow_phase(event: Mapping[str, Any]) -> str | None:
+    """Map one event to a flow phase using canonical type/category only."""
+
+    event_type = str(event.get("event_type") or "").casefold()
+    category = str(event.get("category") or "").casefold()
+    if event_type in {"evaluation.triggered", "supervisor.trigger_received"}:
+        return "trigger"
+    if event_type in {"evaluation.started", "supervisor.evaluation_started"}:
+        return "evaluation"
+    if event_type.startswith("decision.") or category == "decision":
+        return "decision"
+    if (
+        event_type == "transmission.confirmation_timeout"
+        or event_type.startswith("localtuya.confirmed")
+        or category in {"external", "error"}
+        or bool(event.get("is_external"))
+    ):
+        return "result"
+    if (
+        category in {"action", "transmission"}
+        or event_type.startswith(("action.", "transmission."))
+        or event_type in {"evaluation.no_change", "evaluation.completed"}
+    ):
+        return "action"
+    return None
+
+
+def is_operational_flow_event(event: Mapping[str, Any]) -> bool:
+    """Return whether an event is suitable as an operational correlation anchor."""
+
+    return operational_flow_phase(event) in {"decision", "action", "result"}
+
+
+def _mapping_value(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, str) and value:
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return dict(decoded) if isinstance(decoded, Mapping) else {}
+    return {}
+
+
+def _flow_result_state(events: list[Mapping[str, Any]]) -> str:
+    for event in reversed(events):
+        event_type = str(event.get("event_type") or "").casefold()
+        category = str(event.get("category") or "").casefold()
+        outcome = str(event.get("outcome") or "").casefold()
+        details = _mapping_value(event.get("details_json"))
+        payload = _mapping_value(details.get("payload"))
+        result = _mapping_value(payload.get("result"))
+        action = str(result.get("action") or "").casefold()
+        if category == "external" or bool(event.get("is_external")):
+            return "external"
+        if event_type == "transmission.confirmation_timeout" or outcome == "timeout":
+            return "timeout"
+        if event_type == "decision.blocked" or outcome == "blocked":
+            return "blocked"
+        if event_type == "evaluation.no_change" or outcome in {"no_action", "unchanged"}:
+            return "no_action"
+        if event_type == "evaluation.completed" and action in {"", "no_action", "already_off"}:
+            return "no_action"
+        if (
+            event_type.startswith("localtuya.confirmed")
+            or outcome in {"confirmed", "confirmed_by_localtuya", "suppressed"}
+            or category == "error"
+            or outcome in {"failed", "error", "rejected"}
+        ):
+            return "complete"
+    return "incomplete"
+
+
+def build_operational_flow(
+    events: Sequence[Mapping[str, Any]], correlation_id: str | None = None
+) -> dict[str, Any]:
+    """Build a bounded, language-independent five-phase flow summary."""
+
+    ordered = sorted(
+        (dict(item) for item in events if item),
+        key=lambda item: (str(item.get("occurred_at") or ""), str(item.get("event_id") or "")),
+    )
+    if not ordered:
+        return {
+            "correlation_id": correlation_id,
+            "state": "incomplete",
+            "complete": False,
+            "terminal": False,
+            "occurred_at": None,
+            "steps": [],
+            "missing_phases": list(FLOW_PHASE_LABELS.values()),
+        }
+    phases: dict[str, dict[str, Any]] = {}
+    for event in ordered:
+        phase = operational_flow_phase(event)
+        if not phase:
+            continue
+        if phase in {"trigger", "evaluation"} and phase in phases:
+            continue
+        details = _mapping_value(event.get("details_json"))
+        payload = _mapping_value(details.get("payload"))
+        power_profile = normalize_power_profile(
+            event.get("power_profile", payload.get("power_profile", payload.get("potencia")))
+        )
+        power_level = normalize_power_level(
+            event.get("power_level", payload.get("power_level"))
+        )
+        phases[phase] = {
+            "phase": phase,
+            "phase_label": FLOW_PHASE_LABELS[phase],
+            "present": True,
+            "occurred_at": event.get("occurred_at_local") or event.get("occurred_at"),
+            "event_id": event.get("event_id"),
+            "event_type": event.get("event_type"),
+            "summary": event.get("summary") or event.get("event_type"),
+            "severity": event.get("severity"),
+            "outcome": event.get("outcome"),
+            "treatment": event.get("treatment"),
+            "mode": event.get("mode", event.get("climate_mode")),
+            "preset": event.get("preset"),
+            "power_profile": power_profile,
+            "power_level": power_level,
+            "protection": event.get("protection"),
+            "audibility": event.get("audibility", event.get("expected_audibility")),
+            "confirmation": event.get("confirmation_state"),
+            "reason": event.get("reason", details.get("reason")),
+        }
+    steps = [phases[name] for name in FLOW_PHASE_LABELS if name in phases]
+    state = _flow_result_state(ordered)
+    latest = ordered[-1]
+
+    def latest_value(*names: str) -> Any:
+        for event in reversed(ordered):
+            for name in names:
+                value = event.get(name)
+                if value not in (None, ""):
+                    return value
+        return None
+
+    return {
+        "correlation_id": correlation_id or latest_value("correlation_id"),
+        "state": state,
+        "complete": state != "incomplete",
+        "terminal": state != "incomplete",
+        "occurred_at": latest.get("occurred_at_local") or latest.get("occurred_at"),
+        "treatment": latest_value("treatment"),
+        "mode": latest_value("mode", "climate_mode"),
+        "outcome": latest_value("outcome"),
+        "steps": steps,
+        "missing_phases": [
+            label for name, label in FLOW_PHASE_LABELS.items() if name not in phases
+        ],
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class AuditEvent:
     """One immutable persisted fact observed by the diagnostic integration."""
@@ -294,7 +555,9 @@ class AuditEvent:
     mode: str | None = None
     treatment: str | None = None
     preset: str | None = None
+    power_state: bool | None = None
     power_profile: str | None = None
+    power_level: int | float | None = None
     agenda: str | None = None
     rule: str | None = None
     protection: str | None = None
@@ -363,13 +626,13 @@ class AuditEvent:
             )
         )
 
-        severity = _enum_value(Severity, data.get("severity"), Severity.INFO)
+        severity = classify_event_severity(data)
         retention = _enum_value(
             RetentionClass,
             data.get("retention_class"),
             RetentionClass.TRACE,
         )
-        has_error = _bool(data.get("has_error"), severity in {Severity.ERROR, Severity.CRITICAL})
+        has_error = severity in {Severity.ERROR.value, Severity.CRITICAL.value}
         # ``relation_kind`` is intentionally open-ended in the existing SQLite
         # schema, so retain legacy evidence labels instead of collapsing them.
         relation = _relation(_first(data, "correlation_relation", "relation_kind"))
@@ -413,7 +676,15 @@ class AuditEvent:
             "mode": _text(data.get("mode", data.get("climate_mode")), limit=80),
             "treatment": _text(data.get("treatment"), limit=120),
             "preset": _text(data.get("preset"), limit=180),
-            "power_profile": _text(data.get("power_profile", data.get("power")), limit=180),
+            "power_state": (
+                _bool(data.get("power_state"))
+                if data.get("power_state") is not None
+                else None
+            ),
+            "power_profile": normalize_power_profile(
+                _first(data, "power_profile", "potencia")
+            ),
+            "power_level": normalize_power_level(data.get("power_level")),
             "agenda": _text(_first(data, "agenda", "agenda_state"), limit=255),
             "rule": _text(_first(data, "rule", default=details_mapping.get("rule")), limit=255),
             "protection": _text(data.get("protection"), limit=255),
@@ -499,6 +770,8 @@ class AuditEvent:
             "target_temperature": self.target_temperature,
             "humidity": self.humidity,
             "causality_asserted": self.causality_asserted,
+            "power_state": self.power_state,
+            "power_level": self.power_level,
         }.items():
             if value is not None and key not in details:
                 details[key] = value

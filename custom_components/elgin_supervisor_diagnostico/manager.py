@@ -21,7 +21,14 @@ from homeassistant.util import dt as dt_util
 from .anomaly import AnomalyEngine
 from .const import DIAGNOSTIC_EVENT, DOMAIN, SELF_ENTITY_PREFIXES, UPDATED_EVENT
 from .exporter import DiagnosticExporter, sanitize
-from .models import DiagnosticSettings
+from .models import (
+    DiagnosticSettings,
+    build_operational_flow,
+    classify_event_severity,
+    is_operational_flow_event,
+    normalize_power_level,
+    normalize_power_profile,
+)
 from .origin_resolver import OriginResolver
 from .snapshot import build_state_diff, capture_state_snapshot, freeze_json, thaw_json
 from .storage import DiagnosticStorage
@@ -130,6 +137,19 @@ def _enum_text(value: Any, default: str | None = None) -> str | None:
     return str(getattr(value, "value", value))
 
 
+def _optional_bool(value: Any) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().casefold()
+    if normalized in {"1", "true", "on", "yes", "sim"}:
+        return True
+    if normalized in {"0", "false", "off", "no", "não", "nao"}:
+        return False
+    return None
+
+
 class DiagnosticManager:
     """Observe HA events, persist evidence and never control climate state."""
 
@@ -165,6 +185,7 @@ class DiagnosticManager:
         self._last_external: dict[str, Any] | None = None
         self._last_decision: dict[str, Any] | None = None
         self._last_confirmation: dict[str, Any] | None = None
+        self._last_flow_cache = build_operational_flow([], None)
         self._status = "Inicializando"
         self._instrumentation_seen = False
         self._captured = 0
@@ -1074,7 +1095,13 @@ class DiagnosticManager:
             "climate_mode": data.get("mode") or data.get("climate_mode"),
             "treatment": data.get("treatment") or data.get("tratamento"),
             "preset": data.get("preset"),
-            "power_profile": data.get("power") or data.get("potencia"),
+            "power_state": _optional_bool(data.get("power_state")),
+            "power_profile": normalize_power_profile(
+                data.get("power_profile")
+                if data.get("power_profile") is not None
+                else data.get("potencia")
+            ),
+            "power_level": normalize_power_level(data.get("power_level")),
             "agenda_state": data.get("agenda_action") or data.get("agenda_state"),
             "protection": data.get("protection"),
             "function": data.get("function"),
@@ -1096,6 +1123,8 @@ class DiagnosticManager:
                 "target_temperature": data.get(
                     "target_temperature", desired.get("target_temperature")
                 ),
+                "power_state": _optional_bool(data.get("power_state")),
+                "power_level": normalize_power_level(data.get("power_level")),
                 "rule": data.get("rule"),
                 "reason": data.get("reason"),
                 "payload": data
@@ -1193,17 +1222,18 @@ class DiagnosticManager:
     @staticmethod
     def _stage_semantics(stage: str, data: Mapping[str, Any]) -> tuple[str, str, str, str, str]:
         mapping = {
-            "trigger_received": ("evaluation", "evaluation.triggered", "info", "started", "no_transmission"),
-            "evaluation_started": ("evaluation", "evaluation.started", "info", "started", "no_transmission"),
+            "trigger_received": ("evaluation", "evaluation.triggered", "debug", "started", "no_transmission"),
+            "evaluation_started": ("evaluation", "evaluation.started", "debug", "started", "no_transmission"),
             "decision_calculated": ("decision", "decision.calculated", "info", "calculated", "no_transmission"),
             "decision_blocked": ("decision", "decision.blocked", "warning", "blocked", "no_transmission"),
-            "evaluation_no_change": ("evaluation", "evaluation.no_change", "info", "no_action", "no_transmission"),
+            "evaluation_no_change": ("evaluation", "evaluation.no_change", "debug", "no_action", "no_transmission"),
             "evaluation_completed": ("evaluation", "evaluation.completed", "success", "completed", "no_transmission"),
             "transmission_requested": ("transmission", "transmission.logical_request", "info", "requested", "audible_expected"),
             "transmission_accepted_by_software": ("transmission", "transmission.accepted_by_software", "success", "accepted_by_software", "audible_expected"),
             "transmission_suppressed": ("transmission", "transmission.duplicate_suppressed", "success", "suppressed", "no_transmission"),
             "eco_requested": ("transmission", "transmission.eco_logical_request", "info", "requested", "audible_expected"),
             "localtuya_confirmed": ("state", "localtuya.confirmed_full_state", "success", "confirmed_by_localtuya", "unknown"),
+            "localtuya_confirmation": ("state", "localtuya.confirmed_full_state", "success", "confirmed_by_localtuya", "unknown"),
             "external_change": ("external", "localtuya.external_or_indeterminate", "warning", "observed", "unknown"),
             "error": ("error", "supervisor.error", "error", "failed", "unknown"),
         }
@@ -1270,7 +1300,7 @@ class DiagnosticManager:
                 "occurred_at": capture["occurred_at"],
                 "category": "agenda",
                 "event_type": "agenda.evaluated",
-                "severity": "info",
+                "severity": "debug",
                 "outcome": "calculated",
                 "summary": "Agenda do Supervisor recalculou a política temporal.",
                 "source_component": "elgin_supervisor_agenda",
@@ -1392,6 +1422,10 @@ class DiagnosticManager:
         event.setdefault("mode", event.get("climate_mode"))
         event.setdefault("agenda", event.get("agenda_state"))
         event.setdefault("audibility", event.get("expected_audibility"))
+        event["power_profile"] = normalize_power_profile(event.get("power_profile"))
+        event["power_level"] = normalize_power_level(event.get("power_level"))
+        event["severity"] = classify_event_severity(event)
+        event["has_error"] = event["severity"] in {"error", "critical"}
         critical = bool(
             event.get("transmission_id")
             or event.get("is_external")
@@ -1815,13 +1849,15 @@ class DiagnosticManager:
         return updated.as_dict()
 
     async def async_get_snapshot(self, *, include_recent: bool = True) -> dict[str, Any]:
-        health, statistics, anomalies, observations = await asyncio.gather(
+        health, statistics, anomalies, observations, persisted_flow = await asyncio.gather(
             self.storage.async_health(),
             self.storage.async_get_statistics(),
             self.storage.async_list_anomalies("active", 50),
             self.storage.async_list_observations(50),
+            self.storage.async_get_latest_operational_correlation(),
         )
         self._cached_health = dict(health)
+        self._last_flow_cache = await self._async_build_latest_flow(persisted_flow)
         snapshot = self.status_snapshot()
         snapshot["storage"] = health
         snapshot["database"] = health
@@ -1843,28 +1879,59 @@ class DiagnosticManager:
         )
         return snapshot
 
-    def _last_flow(self) -> list[dict[str, Any]]:
-        anchor = self._last_confirmation or self._last_transmission or self._last_decision
-        correlation_id = anchor.get("correlation_id") if anchor else None
-        if not correlation_id:
-            return []
-        related = [
+    async def _async_build_latest_flow(
+        self, persisted: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Merge the newest persisted correlation with the unflushed tail."""
+
+        persisted_id = str(persisted.get("correlation_id") or "") or None
+        persisted_anchor = str(persisted.get("anchor_occurred_at") or "") or None
+        memory_candidates = [
             item
             for item in self._recent
-            if item.get("correlation_id") == correlation_id
-        ][-12:]
-        return [
-            {
-                "event_id": item.get("event_id"),
-                "label": item.get("summary") or item.get("event_type"),
-                "event_type": item.get("event_type"),
-                "status": item.get("outcome") or item.get("severity") or "unknown",
-                "reason": (item.get("details_json") or {}).get("reason")
-                if isinstance(item.get("details_json"), Mapping)
-                else None,
-            }
-            for item in related
+            if item.get("correlation_id") and is_operational_flow_event(item)
         ]
+        memory_anchor = max(
+            memory_candidates,
+            key=lambda item: (
+                str(item.get("occurred_at") or ""),
+                str(item.get("event_id") or ""),
+            ),
+            default=None,
+        )
+        memory_id = (
+            str(memory_anchor.get("correlation_id")) if memory_anchor else None
+        )
+        use_memory = bool(
+            memory_anchor
+            and (
+                not persisted_anchor
+                or _parse_iso(str(memory_anchor.get("occurred_at")))
+                >= _parse_iso(persisted_anchor)
+            )
+        )
+        correlation_id = memory_id if use_memory else persisted_id
+        base_events = list(persisted.get("events") or []) if correlation_id == persisted_id else []
+        if correlation_id and correlation_id != persisted_id:
+            stored = await self.storage.async_get_correlation(correlation_id)
+            base_events = list(stored.get("events") or [])
+        if correlation_id:
+            base_events.extend(
+                item
+                for item in self._recent
+                if item.get("correlation_id") == correlation_id
+            )
+        by_id = {
+            str(item.get("event_id")): dict(item)
+            for item in base_events
+            if item.get("event_id")
+        }
+        return build_operational_flow(list(by_id.values()), correlation_id)
+
+    def _last_flow(self) -> list[dict[str, Any]]:
+        """Compatibility accessor for entity consumers of the former helper."""
+
+        return list(self._last_flow_cache.get("steps") or [])
 
     def _current_supervisor_state(self) -> dict[str, Any]:
         def state(entity_id: str) -> str | None:
@@ -1933,7 +2000,6 @@ class DiagnosticManager:
         storm_active = events_per_minute >= int(self._setting("rate_warning_events", 500))
         persistence_healthy = bool(self.storage.healthy)
         current = self._current_supervisor_state()
-        last_flow = self._last_flow()
         return {
             "status": self._status,
             "healthy": self._status == "Operacional" and persistence_healthy,
@@ -1953,7 +2019,7 @@ class DiagnosticManager:
             "last_external_change": dict(self._last_external) if self._last_external else None,
             "last_decision": dict(self._last_decision) if self._last_decision else None,
             "last_confirmation": dict(self._last_confirmation) if self._last_confirmation else None,
-            "last_complete_flow": {"steps": last_flow},
+            "last_complete_flow": dict(self._last_flow_cache),
             "counters": {
                 "captured": self._captured,
                 "ignored": self._ignored,

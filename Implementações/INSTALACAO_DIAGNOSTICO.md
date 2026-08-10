@@ -1,5 +1,7 @@
 # Elgin Supervisor — instalação manual do diagnóstico
 
+Versão deste pacote: **1.0.3** (schema SQLite 6).
+
 Este pacote instala somente auditoria local. Ele não contém alterações de
 ESPHome/C++ e não deve chamar Climate, LocalTuya ou o transmissor IR.
 
@@ -38,17 +40,28 @@ arquivos do ESPHome.
    para correção manual.
 7. Em Lovelace no modo storage, o recurso é registrado automaticamente como:
 
-   `/elgin_supervisor_diagnostico/frontend/elgin-supervisor-diagnostico-card.js?v=1.0.2`
+   `/elgin_supervisor_diagnostico/frontend/elgin-supervisor-diagnostico-card.js?v=1.0.3`
 
    Se os recursos forem mantidos em YAML, registre essa URL manualmente como
    `module`. Remova somente URLs antigas do mesmo card após confirmar o backup.
-8. Cole `Dashboards/dashboard_supervisor.yaml` no editor do dashboard.
+8. No primeiro início, o componente cria antes da migração o backup
+   `.storage/elgin_supervisor_diagnostico.pre-v6.sqlite3.bak`. A migração
+   reclassifica somente eventos rotineiros conhecidos e limpa perfis de
+   potência ambíguos; o histórico bruto sanitizado permanece preservado.
+9. Cole `Dashboards/dashboard_supervisor.yaml` no editor do dashboard.
 
 ## Primeiro teste obrigatório
 
 Mantenha o modo sombra ligado. Confirme no card:
 
-- status operacional, schema 5 e `quick_check: ok`;
+- status operacional, schema 6 e `quick_check: ok`;
+- seletor de severidade com Rotina, Informação, Sucesso, Atenção, Erro e
+  Crítico, nessa ordem, inclusive quando a contagem for zero;
+- faceta Potência sem `0`, `1`, `true`, `false`, `on` ou `off`;
+- somente um seletor auxiliar aberto, com fechamento por clique externo,
+  `Tab` e `Escape`;
+- último fluxo coerente com a correlação mais recente, inclusive após novo
+  carregamento do card;
 - Timeline recebendo avaliações sem transmissão;
 - abas, detalhes Antes/Depois/Diff, cursores e filtros;
 - registro de 1, 2, vários e quantidade incerta de bips;
@@ -62,25 +75,31 @@ O diagnóstico deve continuar sem qualquer ação caso seja removido ou falhe.
 ## Teste físico controlado
 
 Depois do modo sombra passar, desative-o apenas durante uma janela acompanhada.
-Teste Power ON/OFF, Heat, Cool, Dry, fan, swing, Eco, I Feel e LocalTuya. Valide:
+Teste Power ON/OFF, Aquecimento, Refrigeração, Desumidificação, ventilação,
+swing, Eco, I Feel e LocalTuya. Valide:
 
 - um estado completo produz um único frame IR;
 - importação LocalTuya não transmite IR;
 - `SensorUpdate` é silencioso;
-- Eco só é separado em Cool;
+- Eco só é separado em Refrigeração;
 - não há comando duplicado nem bip introduzido pelo diagnóstico.
 
 Para investigar os bips do ciclo de desumidificação, registre a observação no
-horário exato e filtre por `audible_expected`, função, modo Dry, umidade,
+horário exato e filtre por `audible_expected`, função, modo Desumidificação, umidade,
 tratamento, transmissão e correlação. Uma proximidade temporal é evidência, não
 prova de causalidade física.
 
 ## Rollback
 
 1. Reative o modo sombra.
-2. Restaure o package, o custom component e o dashboard anteriores.
-3. Remova o recurso Lovelace novo se necessário.
-4. Para restaurar o SQLite, pare o Home Assistant antes de repor o arquivo do
-   backup; nunca edite `.storage` manualmente.
-5. Reinicie manualmente e confirme o fluxo original antes de sair do modo
+2. Restaure pelo backup/Git o package, o custom component e o dashboard da
+   versão 1.0.2.
+3. Retorne o recurso Lovelace para `?v=1.0.2`.
+4. Se a migração do schema 6 já ocorreu, restaure o SQLite pelo backup somente
+   com o Home Assistant parado; nunca edite `.storage` manualmente.
+5. Para usar o backup automático, restaure
+   `.storage/elgin_supervisor_diagnostico.pre-v6.sqlite3.bak` como
+   `.storage/elgin_supervisor_diagnostico.sqlite3` ainda com o Home Assistant
+   parado.
+6. Reinicie manualmente e confirme o fluxo original antes de sair do modo
    sombra.

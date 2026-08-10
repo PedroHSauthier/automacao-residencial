@@ -80,6 +80,52 @@ class StaticContractTests(unittest.TestCase):
             hashlib.sha256(canonical.encode()).hexdigest(),
         )
 
+    def test_diagnostic_power_payload_uses_unambiguous_top_level_keys(self) -> None:
+        class HALoader(yaml.SafeLoader):
+            pass
+
+        HALoader.add_multi_constructor(
+            "!",
+            lambda loader, _suffix, node: loader.construct_scalar(node)
+            if isinstance(node, yaml.ScalarNode)
+            else loader.construct_sequence(node)
+            if isinstance(node, yaml.SequenceNode)
+            else loader.construct_mapping(node),
+        )
+        package = yaml.load(
+            (REPOSITORY / "packages/elgin_supervisor_climatico.yaml").read_text(),
+            Loader=HALoader,
+        )
+        payloads: list[dict] = []
+
+        def collect(value) -> None:
+            if isinstance(value, list):
+                for item in value:
+                    collect(item)
+            elif isinstance(value, dict):
+                if value.get("event") == "elgin_supervisor_diagnostic_event":
+                    payloads.append(value.get("event_data", {}))
+                for item in value.values():
+                    collect(item)
+
+        collect(package)
+        self.assertGreater(len(payloads), 10)
+        self.assertTrue(all("power" not in payload for payload in payloads))
+        full_state = [
+            payload
+            for payload in payloads
+            if payload.get("stage")
+            in {
+                "transmission_requested",
+                "transmission_suppressed",
+                "transmission_accepted_by_software",
+            }
+            and payload.get("function") == "full_state"
+        ]
+        self.assertEqual(3, len(full_state))
+        self.assertTrue(all("power_state" in payload for payload in full_state))
+        self.assertTrue(all("power" in payload.get("desired", {}) for payload in full_state))
+
     def test_websocket_uses_current_schema_and_admin_contract(self) -> None:
         source = (COMPONENT / "websocket.py").read_text()
         tree = ast.parse(source)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import Future
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
@@ -20,7 +21,7 @@ from _bootstrap import PACKAGE, load
 const_stub = ModuleType(f"{PACKAGE}.const")
 const_stub.DB_FILENAME = "elgin_supervisor_diagnostico.sqlite3"
 const_stub.LEGACY_FALLBACK_FILENAME = "elgin_supervisor_diagnostico_critical_fallback.ndjson"
-const_stub.SCHEMA_VERSION = 5
+const_stub.SCHEMA_VERSION = 6
 sys.modules[f"{PACKAGE}.const"] = const_stub
 storage_module = load("storage")
 
@@ -116,7 +117,7 @@ class StorageIntegrationTests(unittest.TestCase):
     def test_schema_wal_and_required_indexes(self) -> None:
         connection = self.storage._require_connection()
         self.assertEqual("wal", connection.execute("PRAGMA journal_mode").fetchone()[0])
-        self.assertEqual(5, connection.execute("PRAGMA user_version").fetchone()[0])
+        self.assertEqual(6, connection.execute("PRAGMA user_version").fetchone()[0])
         indexes = {
             row[1]
             for row in connection.execute("PRAGMA index_list(events)").fetchall()
@@ -251,7 +252,7 @@ class StorageIntegrationTests(unittest.TestCase):
         legacy_storage = legacy_root / ".storage"
         legacy_storage.mkdir(parents=True)
         database = legacy_storage / "elgin_supervisor_diagnostico.sqlite3"
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection:
             connection.executescript(
                 """
                 CREATE TABLE events (
@@ -313,10 +314,10 @@ class StorageIntegrationTests(unittest.TestCase):
             self.assertEqual(
                 "confirmed_json_preservado_sem_reinterpretacao", row["legacy_semantics"]
             )
-            self.assertEqual(5, connection.execute("PRAGMA user_version").fetchone()[0])
+            self.assertEqual(6, connection.execute("PRAGMA user_version").fetchone()[0])
             self.assertTrue(
-                database.with_suffix(".pre-v5.sqlite3.bak").exists(),
-                "A migração deve preservar um backup anterior ao schema 5",
+                database.with_suffix(".pre-v6.sqlite3.bak").exists(),
+                "A migração deve preservar um backup anterior ao schema 6",
             )
             self.assertNotIn(
                 "idx_anomalies_active_type",
@@ -400,7 +401,11 @@ class StorageIntegrationTests(unittest.TestCase):
         self.assertEqual(100, connection.execute("SELECT COUNT(*) FROM events WHERE is_external=1").fetchone()[0])
 
         catalog = self.storage._get_filter_catalog({"categories": ["transmission"]})
-        self.assertEqual("transmission", catalog["categories"][0]["value"])
+        category_counts = {
+            item["value"]: item["count"] for item in catalog["categories"]
+        }
+        self.assertEqual(100, category_counts["transmission"])
+        self.assertIn("error", category_counts)
         self.assertIn("activation_models", catalog["facets"])
         statistics = self.storage._get_statistics({"categories": ["transmission"]})
         self.assertEqual(100, statistics["total_events"])
@@ -481,7 +486,7 @@ class StorageIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(self.storage._last_backup)
         backup = Path(self.storage._last_backup)
         self.assertTrue(backup.exists())
-        with sqlite3.connect(backup) as recovered:
+        with closing(sqlite3.connect(backup)) as recovered:
             self.assertEqual(2, recovered.execute("SELECT COUNT(*) FROM events").fetchone()[0])
 
     def test_statistics_count_distinct_evaluations_and_persist_health_metadata(self) -> None:
@@ -947,6 +952,95 @@ class StorageIntegrationTests(unittest.TestCase):
         self.assertFalse(self.storage.healthy)
         self.assertEqual(1, self.storage._fallback_write_failures)
         self.assertIn("fallback", self.storage._last_failure)
+
+    def test_disjunctive_facets_respect_other_filters_and_keep_choices(self) -> None:
+        batch = [
+            self.event(
+                20_000 + index,
+                event_type=f"decision.cool.{index}",
+                category="decision",
+                climate_mode="cool",
+                severity="info",
+                power_profile="Fraco",
+                fingerprint=f"cool-{index}",
+            )
+            for index in range(2)
+        ]
+        batch.extend(
+            self.event(
+                20_100 + index,
+                event_type=f"decision.heat.{index}",
+                category="decision",
+                climate_mode="heat",
+                severity="warning",
+                power_profile="Moderado",
+                fingerprint=f"heat-{index}",
+            )
+            for index in range(3)
+        )
+        batch.extend(
+            (
+                self.event(20_200, event_type="legacy.power.one", power_profile="1", fingerprint="power-one"),
+                self.event(20_201, event_type="legacy.power.boolean", power_profile="true", fingerprint="power-true"),
+            )
+        )
+        self.storage._write_batch(batch)
+        catalog = self.storage._get_filter_catalog(
+            {"modes": ["cool"], "severities": ["warning"]}
+        )
+        severities = catalog["facets"]["severity"]
+        self.assertEqual(
+            ["debug", "info", "success", "warning", "error", "critical"],
+            [item["value"] for item in severities],
+        )
+        severity_counts = {item["value"]: item["count"] for item in severities}
+        self.assertEqual(2, severity_counts["info"])
+        self.assertEqual(0, severity_counts["warning"])
+        modes = {item["value"]: item["count"] for item in catalog["facets"]["mode"]}
+        self.assertEqual(3, modes["heat"])
+        self.assertEqual(0, modes["cool"])
+
+        power_catalog = self.storage._get_filter_catalog({})["facets"]["power"]
+        power_values = {str(item["value"]) for item in power_catalog}
+        self.assertIn("Fraco", power_values)
+        self.assertIn("Moderado", power_values)
+        self.assertTrue({"0", "1", "true", "false", "on", "off"}.isdisjoint(power_values))
+
+    def test_latest_operational_correlation_uses_time_and_sqlite_history(self) -> None:
+        old = self.event(
+            30_000,
+            occurred_at="2026-08-09T10:00:00+00:00",
+            event_type="localtuya.confirmed_full_state",
+            category="state",
+            correlation_id="corr-old-confirmation",
+            outcome="confirmed_by_localtuya",
+            fingerprint="old-confirmation",
+        )
+        newer = self.event(
+            30_001,
+            occurred_at="2026-08-09T11:00:00+00:00",
+            event_type="decision.calculated",
+            category="decision",
+            correlation_id="corr-new-decision",
+            outcome="calculated",
+            fingerprint="new-decision",
+        )
+        action = self.event(
+            30_002,
+            occurred_at="2026-08-09T11:00:01+00:00",
+            event_type="transmission.accepted_by_software",
+            category="transmission",
+            correlation_id="corr-new-decision",
+            outcome="accepted_by_software",
+            fingerprint="new-action",
+        )
+        self.storage._write_batch([old, newer, action])
+        result = self.storage._get_latest_operational_correlation()
+        self.assertEqual("corr-new-decision", result["correlation_id"])
+        self.assertEqual(
+            ["event-030001", "event-030002"],
+            [item["event_id"] for item in result["events"]],
+        )
 
 
 if __name__ == "__main__":

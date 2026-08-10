@@ -9,7 +9,7 @@ from homeassistant.const import Platform
 
 DOMAIN: Final = "elgin_supervisor_diagnostico"
 NAME: Final = "Elgin Supervisor — Diagnóstico"
-VERSION: Final = "1.0.2"
+VERSION: Final = "1.0.3"
 
 PLATFORMS: Final = (
     Platform.SENSOR,
@@ -24,7 +24,7 @@ DATA_WEBSOCKET_REGISTERED: Final = "websocket_registered"
 
 DATABASE_FILENAME: Final = "elgin_supervisor_diagnostico.sqlite3"
 DB_FILENAME: Final = DATABASE_FILENAME
-SCHEMA_VERSION: Final = 5
+SCHEMA_VERSION: Final = 6
 LEGACY_FALLBACK_FILENAME: Final = (
     "elgin_supervisor_diagnostico_critical_fallback.ndjson"
 )

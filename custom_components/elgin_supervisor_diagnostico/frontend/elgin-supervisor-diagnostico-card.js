@@ -4,7 +4,7 @@
   const DOMAIN = "elgin_supervisor_diagnostico";
   const CARD_TAG = "elgin-supervisor-diagnostico-card";
   const PICKER_TAG = "elgin-diagnostic-multiselect";
-  const BUILD = "diagnostico-observabilidade-20260809.3";
+  const BUILD = "diagnostico-observabilidade-20260809.4";
 
   const TABS = [
     ["overview", "Panorama", "mdi:view-dashboard-outline"],
@@ -73,9 +73,9 @@
     { value: "decisions", label: "Decisões", icon: "mdi:state-machine", filters: { categories: ["decision", "evaluation"] } },
     { value: "blocked", label: "Bloqueios", icon: "mdi:shield-lock", filters: { outcomes: ["blocked", "suppressed"] } },
     { value: "ifeel", label: "I Feel", icon: "mdi:thermometer-auto", filters: { text: "I Feel" } },
-    { value: "cool", label: "Cool", icon: "mdi:snowflake", filters: { modes: ["cool"] } },
-    { value: "heat", label: "Heat", icon: "mdi:radiator", filters: { modes: ["heat"] } },
-    { value: "dry", label: "Dry", icon: "mdi:water-percent", filters: { modes: ["dry"] } },
+    { value: "cool", label: "Refrigeração", icon: "mdi:snowflake", filters: { modes: ["cool"] } },
+    { value: "heat", label: "Aquecimento", icon: "mdi:radiator", filters: { modes: ["heat"] } },
+    { value: "dry", label: "Desumidificação", icon: "mdi:water-percent", filters: { modes: ["dry"] } },
     { value: "today", label: "Hoje", icon: "mdi:calendar-today", period: "today" },
     { value: "last_hour", label: "Última hora", icon: "mdi:clock-outline", period: "last_hour" },
   ];
@@ -177,17 +177,136 @@
   };
 
   const OPERATOR_LABELS = new Map(DEFAULT_OPERATORS);
-  const CODE_LABELS = {
-    info: "Informação", warning: "Atenção", error: "Erro", critical: "Crítico", success: "Sucesso",
-    decision: "Decisão", evaluation: "Avaliação", state_change: "Mudança de estado",
-    action: "Ação", transmission: "Transmissão", external: "Alteração externa",
-    observation: "Observação", user_observation: "Observação do usuário", anomaly: "Anomalia",
-    cool: "Refrigeração · Cool", heat: "Aquecimento · Heat", dry: "Desumidificação · Dry",
-    fan_only: "Ventilação", off: "Desligado", blocked: "Bloqueado", suppressed: "Suprimido",
-    confirmed: "Confirmado", failed: "Falhou", observed_by_user: "Observado pelo usuário",
-    audible_expected: "Audível esperado", silent_expected: "Silencioso esperado",
-    no_ir_transmission: "Sem transmissão IR", unknown: "Não determinado",
+  const PRESENTATION_LABELS = {
+    severity: {
+      debug: "Rotina", info: "Informação", success: "Sucesso", warning: "Atenção",
+      error: "Erro", critical: "Crítico",
+    },
+    capture_mode: { essential: "Essencial", normal: "Normal", intensive: "Intensivo" },
+    category: {
+      logical: "Evento lógico", system: "Sistema", configuration: "Configuração",
+      maintenance: "Manutenção", agenda: "Agenda", decision: "Decisão",
+      evaluation: "Avaliação", state: "Estado", state_change: "Mudança de estado",
+      state_import: "Importação de estado", action: "Ação", transmission: "Transmissão",
+      external: "Alteração externa", observation: "Observação",
+      user_observation: "Observação do usuário", anomaly: "Anomalia", error: "Erro",
+    },
+    mode: {
+      cool: "Refrigeração", heat: "Aquecimento", dry: "Desumidificação",
+      fan: "Ventilação", fan_only: "Ventilação", auto: "Automático", off: "Desligado",
+    },
+    outcome: {
+      started: "Iniciado", calculated: "Calculado", unchanged: "Sem mudança",
+      requested: "Solicitado", requested_by_ha: "Solicitado pelo Home Assistant",
+      accepted: "Aceito", accepted_by_software: "Aceito pelo software", observed: "Observado",
+      observed_by_user: "Observado pelo usuário", confirmed: "Confirmado",
+      confirmed_by_localtuya: "Confirmado pelo LocalTuya", diverged: "Divergente",
+      diverged_or_external: "Divergente ou externo", suppressed: "Suprimido",
+      blocked: "Bloqueado", rejected: "Rejeitado", failed: "Falhou", external: "Externo",
+      completed: "Concluído", no_action: "Nenhuma ação", not_confirmed: "Não confirmado",
+      detected: "Detectado", acknowledged: "Reconhecido", resolved: "Resolvido",
+      active: "Ativo", created: "Criado", removed: "Removido", deleted: "Excluído",
+      unknown: "Desconhecido",
+    },
+    audibility: {
+      audible_expected: "Audível esperado", silent_expected: "Silencioso esperado",
+      no_transmission: "Sem transmissão IR", no_ir_transmission: "Sem transmissão IR",
+      not_determined: "Não determinada", observed_by_user: "Observado pelo usuário",
+      unknown: "Não determinada",
+    },
+    origin: {
+      home_assistant_user: "Usuário do Home Assistant", automation: "Automação",
+      integration: "Integração", external: "Externa", external_or_indeterminate: "Externa ou indeterminada",
+      indeterminate: "Indeterminada", unknown: "Não determinada", observed: "Observada",
+    },
+    agenda: {
+      normal: "Normal", shadow: "Modo sombra", suspend: "Suspender",
+      disable_supervisor: "Desabilitar Supervisor", power_off: "Desligamento único",
+      power_off_block: "Desligar e bloquear", unknown: "Desconhecida",
+    },
+    protection: {
+      supervisor_disabled: "Supervisor desabilitado", atomic_snapshot_integrity: "Integridade do snapshot",
+      agenda_suspend: "Suspensão pela Agenda", agenda_power_off_block: "Desligamento bloqueado pela Agenda",
+      agenda_single_power_off: "Desligamento único pela Agenda",
+      physical_sync_or_classification: "Sincronização ou classificação física",
+      preserve_adopted_physical_state: "Preservação do estado físico adotado",
+      manual_pause: "Pausa manual", mode_change_minimum_time: "Tempo mínimo para troca de modo",
+      transmission_or_reconciliation_in_progress: "Transmissão ou reconciliação em andamento",
+      agenda_block_automatic_off: "Agenda bloqueia desligamento automático",
+      agenda_block_start: "Agenda bloqueia partida", minimum_on_time: "Tempo mínimo ligado",
+      minimum_off_time: "Tempo mínimo desligado", mode_change_started: "Troca de modo iniciada",
+    },
+    function: {
+      full_state: "Estado completo", eco: "Eco", sensor_update: "Atualização SensorUpdate",
+      passive_import: "Importação passiva", display: "Display", clean: "Limpeza",
+      climate: "Climate", script: "Script", localtuya: "LocalTuya",
+      physical_adoption: "Adoção física", manual_pause: "Pausa manual",
+      automatic_reconciliation: "Reconciliação automática", observed_power_off: "Power OFF observado",
+    },
+    activation_model: {
+      state: "Estado", event: "Evento", time_pattern: "Padrão de tempo",
+      manual: "Manual", automation: "Automação",
+    },
+    flow_state: {
+      complete: "Completo", incomplete: "Incompleto", blocked: "Bloqueado",
+      no_action: "Sem ação", timeout: "Tempo esgotado", external: "Alteração externa",
+    },
+    generic: {
+      unknown: "Desconhecido", unavailable: "Indisponível", true: "Sim", false: "Não",
+      esphome: "ESPHome", localtuya: "LocalTuya", home_assistant: "Home Assistant",
+      ifeel: "I Feel", i_feel: "I Feel", eco: "Eco", ir: "IR", ha: "HA",
+    },
   };
+
+  const PRESENTATION_FIELD_ALIASES = {
+    severities: "severity", categories: "category", modes: "mode", outcomes: "outcome",
+    audibilities: "audibility", origins: "origin", agendas: "agenda",
+    protections: "protection", functions: "function", activation_models: "activation_model",
+    climate_mode: "mode", expected_audibility: "audibility", origin_class: "origin",
+    power_profiles: "power_profile",
+  };
+
+  const presentationFieldForLabel = (label) => ({
+    "Severidade": "severity", "Categoria": "category", "Resultado": "outcome",
+    "Modo": "mode", "Modo físico": "mode", "Potência": "power_profile",
+    "Potência efetiva": "power_profile", "Perfil de potência": "power_profile",
+    "Nível de potência": "power_level", "Audibilidade": "audibility",
+    "Origem": "origin", "Agenda": "agenda", "Agenda influenciando": "agenda",
+    "Proteção": "protection", "Proteção ativa": "protection", "Função": "function",
+    "Modo de captura": "capture_mode", "Captura": "capture_mode",
+    "Estado do fluxo": "flow_state", "Heat": "mode", "Cool": "mode", "Dry": "mode",
+  })[label] || "generic";
+
+  const presentationValue = (field, value, showTechnical = false) => {
+    const canonicalField = PRESENTATION_FIELD_ALIASES[field] || field || "generic";
+    if (value === undefined) return "Ausente";
+    if (value === null || value === "") return "Não informado";
+    if (canonicalField === "power_profile" && typeof value === "boolean") return "Não informado";
+    if (canonicalField === "power_level" && typeof value === "boolean") return "Não informado";
+    if (value === true) return "Sim";
+    if (value === false) return "Não";
+    if (typeof value === "object") {
+      try { return JSON.stringify(value); } catch (_error) { return String(value); }
+    }
+    const raw = String(value);
+    const normalized = raw.trim().toLocaleLowerCase("pt-BR");
+    if (canonicalField === "power_level") {
+      const numeric = Number(raw.replace(",", "."));
+      return Number.isFinite(numeric) ? `Nível ${new Intl.NumberFormat("pt-BR").format(numeric)}` : raw;
+    }
+    if (canonicalField === "power_profile") {
+      if (["0", "1", "true", "false", "on", "off"].includes(normalized)) return "Não informado";
+      const numeric = Number(raw.replace(",", "."));
+      if (Number.isFinite(numeric)) return `Nível ${new Intl.NumberFormat("pt-BR").format(numeric)}`;
+      return raw;
+    }
+    const mapped = PRESENTATION_LABELS[canonicalField]?.[normalized]
+      || PRESENTATION_LABELS.generic[normalized];
+    if (!mapped) return raw;
+    return showTechnical && mapped !== raw ? `${mapped} · ${raw}` : mapped;
+  };
+
+  const CODE_LABELS = Object.assign({}, ...Object.values(PRESENTATION_LABELS));
 
   const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -299,18 +418,7 @@
     return event?.observation_id ?? details.observation_id ?? "";
   };
 
-  const semanticValue = (value) => {
-    if (value === undefined) return "Ausente";
-    if (value === null) return "Nulo";
-    if (value === "unknown") return "unknown · valor desconhecido pelo Home Assistant";
-    if (value === "unavailable") return "unavailable · fonte indisponível";
-    if (value === true) return "Sim";
-    if (value === false) return "Não";
-    if (typeof value === "object") {
-      try { return JSON.stringify(value); } catch (_error) { return String(value); }
-    }
-    return String(value);
-  };
+  const semanticValue = (value) => presentationValue("generic", value);
 
   const flattenSnapshot = (snapshot) => {
     if (snapshot === null || snapshot === undefined) return snapshot;
@@ -360,10 +468,28 @@
       this._options = [];
       this._selected = [];
       this._mounted = false;
+      this._listenersConnected = false;
+      this._onDocumentPointerDown = (event) => {
+        if (this._details?.open && !event.composedPath().includes(this)) this._close();
+      };
+      this._onDocumentKeyDown = (event) => {
+        if (event.key !== "Escape" || !this._details?.open) return;
+        event.preventDefault();
+        this._close({ restoreFocus: true });
+      };
+      this._onDocumentFocusIn = (event) => {
+        if (this._details?.open && !event.composedPath().includes(this)) this._close();
+      };
+      this._onPickerOpened = (event) => {
+        if (event.detail?.picker !== this && this._details?.open) this._close();
+      };
     }
 
     connectedCallback() {
-      if (this._mounted) return;
+      if (this._mounted) {
+        this._connectGlobalListeners();
+        return;
+      }
       this._mounted = true;
       const root = this.attachShadow({ mode: "open" });
       root.innerHTML = `
@@ -371,19 +497,22 @@
           :host{display:block;min-width:0;color:var(--primary-text-color)}
           *{box-sizing:border-box}details{position:relative}summary{list-style:none;min-height:40px;padding:8px 34px 8px 10px;border:1px solid var(--divider-color);border-radius:10px;background:var(--card-background-color);cursor:pointer;position:relative;font-size:.85rem}summary::-webkit-details-marker{display:none}summary:after{content:"▾";position:absolute;right:11px;top:9px;color:var(--secondary-text-color)}
           .placeholder{color:var(--secondary-text-color)}.chips{display:flex;gap:4px;flex-wrap:wrap}.chip{display:inline-flex;align-items:center;border-radius:999px;padding:2px 7px;background:color-mix(in srgb,var(--primary-color) 14%,var(--secondary-background-color));font-size:.72rem;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-          .popup{position:absolute;z-index:30;left:0;right:0;top:calc(100% + 4px);padding:8px;border:1px solid var(--divider-color);border-radius:12px;background:var(--card-background-color);box-shadow:var(--ha-card-box-shadow,0 8px 30px rgba(0,0,0,.25));min-width:240px}.search{width:100%;padding:8px;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color);color:var(--primary-text-color);font:inherit}.options{max-height:240px;overflow:auto;margin-top:7px;display:grid;gap:2px}.option{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:7px;border-radius:8px;font-size:.82rem}.option:hover{background:var(--secondary-background-color)}.option input{margin:0}.count{color:var(--secondary-text-color);font-variant-numeric:tabular-nums}.empty{padding:12px;color:var(--secondary-text-color);text-align:center}
+          .popup{position:absolute;z-index:30;left:0;right:0;top:calc(100% + 4px);padding:8px;border:1px solid var(--divider-color);border-radius:12px;background:var(--card-background-color);box-shadow:var(--ha-card-box-shadow,0 8px 30px rgba(0,0,0,.25));min-width:240px}.search{width:100%;padding:8px;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color);color:var(--primary-text-color);font:inherit}.count-scope{margin:6px 2px 0;color:var(--secondary-text-color);font-size:.68rem;line-height:1.3}.options{max-height:240px;overflow:auto;margin-top:7px;display:grid;gap:2px}.option{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:7px;border-radius:8px;font-size:.82rem}.option:hover{background:var(--secondary-background-color)}.option input{margin:0}.count{color:var(--secondary-text-color);font-variant-numeric:tabular-nums}.empty{padding:12px;color:var(--secondary-text-color);text-align:center}
           :focus-visible{outline:2px solid var(--primary-color);outline-offset:2px}
         </style>
         <details>
           <summary aria-label="Abrir seleção múltipla"><span class="selection placeholder">Todas</span></summary>
           <div class="popup">
             <input class="search" type="search" placeholder="Buscar opções" aria-label="Buscar opções">
+            <p class="count-scope">Contagens: registros no recorte atual, sem restringir esta faceta.</p>
             <div class="options" role="listbox" aria-multiselectable="true"></div>
           </div>
         </details>`;
       this._search = root.querySelector(".search");
       this._optionsNode = root.querySelector(".options");
       this._selectionNode = root.querySelector(".selection");
+      this._details = root.querySelector("details");
+      this._summary = root.querySelector("summary");
       this._search.addEventListener("input", () => this._renderOptions());
       root.addEventListener("change", (event) => {
         const input = event.target.closest("input[data-value]");
@@ -395,8 +524,51 @@
         this._renderSelection();
         this.dispatchEvent(new CustomEvent("change", { bubbles: true, composed: true }));
       });
+      this._details.addEventListener("toggle", () => {
+        if (!this._details.open) return;
+        this.dispatchEvent(new CustomEvent("elgin-diagnostic-picker-open", {
+          bubbles: true,
+          composed: true,
+          detail: { picker: this },
+        }));
+      });
+      root.addEventListener("focusout", () => {
+        setTimeout(() => {
+          if (this._details?.open && !this.matches(":focus-within")) this._close();
+        }, 0);
+      });
       this._renderOptions();
       this._renderSelection();
+      this._connectGlobalListeners();
+    }
+
+    disconnectedCallback() {
+      this._disconnectGlobalListeners();
+      this._close();
+    }
+
+    _connectGlobalListeners() {
+      if (this._listenersConnected) return;
+      this._listenersConnected = true;
+      document.addEventListener("pointerdown", this._onDocumentPointerDown, true);
+      document.addEventListener("keydown", this._onDocumentKeyDown, true);
+      document.addEventListener("focusin", this._onDocumentFocusIn, true);
+      document.addEventListener("elgin-diagnostic-picker-open", this._onPickerOpened);
+    }
+
+    _disconnectGlobalListeners() {
+      if (!this._listenersConnected) return;
+      this._listenersConnected = false;
+      document.removeEventListener("pointerdown", this._onDocumentPointerDown, true);
+      document.removeEventListener("keydown", this._onDocumentKeyDown, true);
+      document.removeEventListener("focusin", this._onDocumentFocusIn, true);
+      document.removeEventListener("elgin-diagnostic-picker-open", this._onPickerOpened);
+    }
+
+    _close({ restoreFocus = false } = {}) {
+      if (!this._details?.open) return;
+      this._details.open = false;
+      if (restoreFocus) this._summary?.focus();
     }
 
     set label(value) {
@@ -466,7 +638,11 @@
         text.textContent = item.label;
         const count = document.createElement("span");
         count.className = "count";
-        count.textContent = item.count === null || item.count === undefined ? "" : String(item.count);
+        if (item.count !== null && item.count !== undefined) {
+          count.textContent = new Intl.NumberFormat("pt-BR").format(Number(item.count));
+          count.title = `${count.textContent} registros no recorte atual`;
+          count.setAttribute("aria-label", count.title);
+        }
         label.append(input, text, count);
         fragment.append(label);
       });
@@ -509,6 +685,7 @@
       this._settingsDraft = clone(DEFAULT_SETTINGS);
       this._settingsDirty = false;
       this._pendingEvents = 0;
+      this._flowRefreshTimer = null;
       this._detailEvent = null;
       this._detailEvaluation = null;
       this._detailCorrelation = [];
@@ -550,6 +727,10 @@
 
     disconnectedCallback() {
       this._connected = false;
+      if (this._flowRefreshTimer) {
+        clearTimeout(this._flowRefreshTimer);
+        this._flowRefreshTimer = null;
+      }
       const unsubscribe = this._unsubscribe;
       this._unsubscribe = null;
       this._subscribing = false;
@@ -722,7 +903,7 @@
             <section id="panel-overview" class="tab-panel" role="tabpanel" data-panel="overview">
               <div id="overview-metrics" class="metrics" aria-live="polite"></div>
               <div class="overview-layout">
-                <article class="surface flow-surface"><div class="section-title"><div><div class="eyebrow">Correlação mais recente</div><h2>Último fluxo completo</h2></div><ha-icon icon="mdi:transit-connection-variant"></ha-icon></div><div id="last-flow" class="flow"></div></article>
+                <article class="surface flow-surface"><div class="section-title"><div><div id="last-flow-eyebrow" class="eyebrow">Correlação operacional mais recente</div><h2 id="last-flow-title">Último fluxo observado</h2><p id="last-flow-meta" class="section-subtitle"></p></div><div class="flow-head-actions"><button id="last-flow-correlation" type="button" class="secondary" data-flow-correlation hidden>Abrir correlação</button><ha-icon icon="mdi:transit-connection-variant"></ha-icon></div></div><div id="last-flow" class="flow"></div><p id="last-flow-missing" class="flow-missing" hidden></p></article>
                 <article class="surface"><div class="section-title"><div><div class="eyebrow">Estado atual</div><h2>Supervisor e tratamento</h2></div><ha-icon icon="mdi:robot-outline"></ha-icon></div><dl id="overview-state" class="definition-list"></dl></article>
               </div>
               <article class="surface"><div class="section-title"><div><div class="eyebrow">Eventos essenciais</div><h2>Atividade recente</h2><p class="section-subtitle">Resumo fixo dos eventos mais recentes. Busca e filtros ficam disponíveis nas abas de consulta.</p></div><button type="button" class="secondary" data-tab-jump="timeline">Abrir linha do tempo</button></div><div id="recent-events" class="compact-events"></div></article>
@@ -802,7 +983,7 @@
         ["external_change_reaction", "Mudança externa seguida por reação"],
         ["excessive_volume", "Volume excessivo"],
         ["repeated_error", "Erro repetitivo"],
-        ["critical_entity_unavailable", "Entidade crítica unavailable"],
+        ["critical_entity_unavailable", "Entidade crítica indisponível"],
       ].map(([value, label]) => `<label class="toggle-field"><input type="checkbox" value="${value}" data-setting-list="anomaly_enabled_types"><span>${label}</span></label>`).join("");
       return `
         <div class="panel-head settings-head"><div><div class="eyebrow">ConfigEntry.options</div><h2>Configurações</h2><p>O rascunho permanece intacto mesmo enquanto novos eventos chegam.</p></div><span id="settings-dirty" class="dirty-chip" hidden>Alterações não salvas</span></div>
@@ -811,7 +992,7 @@
           <details><summary>Retenção</summary><div class="settings-grid"><label class="field"><span>Eventos essenciais · dias</span><input type="number" min="1" max="3650" data-setting="retention_essential_days"></label><label class="field"><span>Erros detalhados · dias</span><input type="number" min="1" max="3650" data-setting="retention_error_days"></label><label class="field"><span>Trace completo · dias</span><input type="number" min="1" max="365" data-setting="retention_trace_days"></label><div id="retention-summary" class="setting-info full"></div></div></details>
           <details><summary>Compactação</summary><div class="settings-grid"><label class="toggle-field"><input type="checkbox" data-setting="compaction_enabled"><span>Compactação habilitada</span></label><label class="field"><span>Janela · segundos</span><input type="number" min="1" max="3600" data-setting="compaction_window_seconds"></label><div class="toggle-grid full"><label class="toggle-field"><input type="checkbox" data-setting="compact_identical_evaluations"><span>Avaliações idênticas</span></label><label class="toggle-field"><input type="checkbox" data-setting="compact_no_change"><span>Avaliações sem mudança</span></label><label class="toggle-field"><input type="checkbox" data-setting="compact_identical_states"><span>Estados idênticos</span></label><label class="toggle-field"><input type="checkbox" data-setting="compact_repeated_blocks"><span>Bloqueios repetitivos</span></label><label class="toggle-field"><input type="checkbox" data-setting="compact_repeated_unavailable"><span>Indisponibilidades repetitivas</span></label></div><label class="field"><span>Janela da taxa · s</span><input type="number" min="1" max="3600" data-setting="rate_window_seconds"></label><label class="field"><span>Alerta de volume</span><input type="number" min="1" data-setting="rate_warning_events"></label><label class="field"><span>Limite rígido de volume</span><input type="number" min="1" data-setting="rate_hard_limit_events"></label><p class="setting-info full">Transmissões, erros diferentes, mudanças externas, mudanças de tratamento e observações manuais nunca são compactadas.</p></div></details>
           <details><summary>Correlação</summary><div class="settings-grid"><label class="field"><span>Janela temporal padrão · s</span><input type="number" min="1" max="3600" data-setting="correlation_window_seconds"></label><label class="field"><span>Confirmação LocalTuya · s</span><input type="number" min="1" max="3600" data-setting="localtuya_confirmation_window_seconds"></label><label class="field"><span>Observação externa · s</span><input type="number" min="1" max="3600" data-setting="external_observation_window_seconds"></label><label class="field"><span>Bip · antes · s</span><input type="number" min="1" max="3600" data-setting="beep_window_before_seconds"></label><label class="field"><span>Bip · depois · s</span><input type="number" min="1" max="3600" data-setting="beep_window_after_seconds"></label></div></details>
-          <details><summary>Anomalias</summary><div class="settings-grid"><label class="toggle-field"><input type="checkbox" data-setting="anomalies_enabled"><span>Detecção de anomalias habilitada</span></label><div class="toggle-grid full">${anomalyToggles}</div><label class="field"><span>Comandos próximos · s</span><input type="number" min="1" data-setting="anomaly_close_commands_seconds"></label><label class="field"><span>Comando repetido · janela s</span><input type="number" min="1" data-setting="anomaly_repeated_command_window_seconds"></label><label class="field"><span>Oscilação · janela s</span><input type="number" min="1" data-setting="anomaly_oscillation_window_seconds"></label><label class="field"><span>Oscilação · mudanças</span><input type="number" min="2" data-setting="anomaly_oscillation_min_changes"></label><label class="field"><span>Divergência · s</span><input type="number" min="1" data-setting="anomaly_divergence_seconds"></label><label class="field"><span>Volume · janela s</span><input type="number" min="1" data-setting="anomaly_volume_window_seconds"></label><label class="field"><span>Volume · limite</span><input type="number" min="1" data-setting="anomaly_volume_event_limit"></label><label class="field"><span>Erro repetido · janela s</span><input type="number" min="1" data-setting="anomaly_repeated_error_window_seconds"></label><label class="field"><span>Erro repetido · quantidade</span><input type="number" min="2" data-setting="anomaly_repeated_error_count"></label><label class="field"><span>Unavailable crítico · s</span><input type="number" min="1" data-setting="anomaly_unavailable_seconds"></label><label class="field"><span>Sem mudança · limiar</span><input type="number" min="1" data-setting="anomaly_no_change_threshold"></label><label class="field"><span>Duplicata · janela s</span><input type="number" min="1" data-setting="anomaly_duplicate_window_seconds"></label><label class="field"><span>Rajada audível · janela s</span><input type="number" min="1" data-setting="anomaly_audible_burst_seconds"></label><label class="field"><span>Rajada audível · quantidade</span><input type="number" min="2" data-setting="anomaly_audible_burst_count"></label><label class="field"><span>Janela geral · minutos</span><input type="number" min="1" data-setting="anomaly_window_minutes"></label></div></details>
+          <details><summary>Anomalias</summary><div class="settings-grid"><label class="toggle-field"><input type="checkbox" data-setting="anomalies_enabled"><span>Detecção de anomalias habilitada</span></label><div class="toggle-grid full">${anomalyToggles}</div><label class="field"><span>Comandos próximos · s</span><input type="number" min="1" data-setting="anomaly_close_commands_seconds"></label><label class="field"><span>Comando repetido · janela s</span><input type="number" min="1" data-setting="anomaly_repeated_command_window_seconds"></label><label class="field"><span>Oscilação · janela s</span><input type="number" min="1" data-setting="anomaly_oscillation_window_seconds"></label><label class="field"><span>Oscilação · mudanças</span><input type="number" min="2" data-setting="anomaly_oscillation_min_changes"></label><label class="field"><span>Divergência · s</span><input type="number" min="1" data-setting="anomaly_divergence_seconds"></label><label class="field"><span>Volume · janela s</span><input type="number" min="1" data-setting="anomaly_volume_window_seconds"></label><label class="field"><span>Volume · limite</span><input type="number" min="1" data-setting="anomaly_volume_event_limit"></label><label class="field"><span>Erro repetido · janela s</span><input type="number" min="1" data-setting="anomaly_repeated_error_window_seconds"></label><label class="field"><span>Erro repetido · quantidade</span><input type="number" min="2" data-setting="anomaly_repeated_error_count"></label><label class="field"><span>Indisponibilidade crítica · s</span><input type="number" min="1" data-setting="anomaly_unavailable_seconds"></label><label class="field"><span>Sem mudança · limiar</span><input type="number" min="1" data-setting="anomaly_no_change_threshold"></label><label class="field"><span>Duplicata · janela s</span><input type="number" min="1" data-setting="anomaly_duplicate_window_seconds"></label><label class="field"><span>Rajada audível · janela s</span><input type="number" min="1" data-setting="anomaly_audible_burst_seconds"></label><label class="field"><span>Rajada audível · quantidade</span><input type="number" min="2" data-setting="anomaly_audible_burst_count"></label><label class="field"><span>Janela geral · minutos</span><input type="number" min="1" data-setting="anomaly_window_minutes"></label></div></details>
           <details><summary>Notificações</summary><div class="settings-grid"><label class="toggle-field"><input type="checkbox" data-setting="notifications_enabled"><span>Habilitar notificações</span></label><label class="field"><span>Severidade mínima</span><select data-setting="notification_min_severity"><option value="info">Informação</option><option value="warning">Atenção</option><option value="error">Erro</option><option value="critical">Crítico</option></select></label><label class="field"><span>Tipos (separados por vírgula)</span><input data-setting-csv="notification_types"></label><label class="field"><span>Cooldown · segundos</span><input type="number" min="60" max="86400" data-setting="notification_cooldown_seconds"></label><label class="toggle-field"><input type="checkbox" data-setting="notification_persistent"><span>persistent_notification</span></label><label class="field"><span>Serviço notify opcional</span><input data-setting="notification_service" placeholder="notify.mobile_app"></label></div></details>
           <details><summary>Interface</summary><div class="settings-grid"><label class="field"><span>Itens por página</span><input type="number" min="10" max="250" data-setting="interface_items_per_page"></label><label class="toggle-field"><input type="checkbox" data-setting="interface_auto_refresh"><span>Atualização ao vivo</span></label><label class="field"><span>Colunas (separadas por vírgula)</span><input data-setting-csv="interface_columns"></label><label class="field"><span>Densidade</span><select data-setting="interface_density"><option value="comfortable">Confortável</option><option value="compact">Compacta</option></select></label><label class="toggle-field"><input type="checkbox" data-setting="interface_show_technical_codes"><span>Mostrar códigos técnicos</span></label><label class="toggle-field"><input type="checkbox" data-setting="interface_show_unchanged_attributes"><span>Mostrar atributos sem mudança</span></label><label class="field"><span>Formato da data</span><select data-setting="interface_date_format"><option value="locale">Local</option><option value="relative">Relativo</option><option value="iso">ISO</option></select></label><label class="field"><span>Abrir detalhe</span><select data-setting="interface_detail_mode"><option value="modal">Modal</option><option value="panel">Painel</option></select></label></div></details>
           <details><summary>Privacidade</summary><div class="settings-grid"><label class="toggle-field"><input type="checkbox" data-setting="privacy_resolve_user_names"><span>Resolver nomes de usuários</span></label><label class="toggle-field"><input type="checkbox" data-setting="privacy_store_user_ids"><span>Armazenar IDs de usuários</span></label><label class="toggle-field"><input type="checkbox" data-setting="privacy_store_user_names"><span>Armazenar nomes de usuários</span></label><label class="toggle-field"><input type="checkbox" data-setting="privacy_capture_raw_events"><span>Capturar evento bruto sanitizado</span></label><label class="toggle-field"><input type="checkbox" data-setting="privacy_capture_service_data"><span>Capturar dados de ações</span></label><label class="toggle-field"><input type="checkbox" data-setting="privacy_redact_sensitive_values"><span>Remover valores sensíveis</span></label><label class="toggle-field"><input type="checkbox" data-setting="anonymize_entity_ids"><span>Anonimizar IDs de entidades na exportação</span></label><p class="setting-info full">Tokens, senhas, SSID, chaves de API e credenciais nunca devem ser exportados.</p></div></details>
@@ -839,7 +1020,7 @@
       return `
         <dialog id="event-dialog" class="wide-dialog"><article class="dialog-shell"><header><div><div id="detail-type" class="eyebrow"></div><h2 id="detail-title">Detalhes do evento</h2><div id="detail-chips" class="chip-row"></div></div><button type="button" class="secondary icon-button" data-action="close-detail" aria-label="Fechar detalhes"><ha-icon icon="mdi:close"></ha-icon></button></header><nav id="detail-tabs" class="detail-tabs"><button type="button" data-detail-tab="comparison">Antes · Depois · Diferença</button><button type="button" data-detail-tab="context">Contexto</button><button type="button" data-detail-tab="technical">Técnico</button><button type="button" data-detail-tab="related">Relacionados</button></nav><div id="detail-loading" class="empty-state">Carregando detalhes…</div><div id="detail-content"></div></article></dialog>
 
-        <dialog id="observation-dialog"><form id="observation-form" class="dialog-shell"><header><div><div class="eyebrow">Evidência humana</div><h2 id="observation-title">Registrar observação</h2></div><button type="button" class="secondary icon-button" data-action="close-observation" aria-label="Fechar"><ha-icon icon="mdi:close"></ha-icon></button></header><input type="hidden" name="observation_type" value="note"><label class="field beep-only" hidden><span>Quantidade percebida</span><select name="expected_count"><option value="1">1 bip</option><option value="2">2 bips</option><option value="many">Vários</option><option value="uncertain">Incerto</option></select></label><label class="field"><span>Horário</span><input type="datetime-local" step="1" name="occurred_at" required></label><label class="field note-only"><span>Título</span><input name="title" maxlength="160" placeholder="Ex.: comportamento durante Dry"></label><label class="field"><span>Observação</span><textarea name="note" rows="5" maxlength="4000" placeholder="Descreva o que você ouviu ou observou"></textarea></label><label class="field note-only"><span>Tags</span><input name="tags" placeholder="bip, dry, umidade"></label><p class="notice">Resultado: <strong>Observado pelo usuário</strong>. A correlação temporal não será apresentada como causalidade confirmada.</p><footer><button type="button" class="secondary" data-action="close-observation">Cancelar</button><button type="button" data-action="submit-observation">Registrar</button></footer></form></dialog>
+        <dialog id="observation-dialog"><form id="observation-form" class="dialog-shell"><header><div><div class="eyebrow">Evidência humana</div><h2 id="observation-title">Registrar observação</h2></div><button type="button" class="secondary icon-button" data-action="close-observation" aria-label="Fechar"><ha-icon icon="mdi:close"></ha-icon></button></header><input type="hidden" name="observation_type" value="note"><label class="field beep-only" hidden><span>Quantidade percebida</span><select name="expected_count"><option value="1">1 bip</option><option value="2">2 bips</option><option value="many">Vários</option><option value="uncertain">Incerto</option></select></label><label class="field"><span>Horário</span><input type="datetime-local" step="1" name="occurred_at" required></label><label class="field note-only"><span>Título</span><input name="title" maxlength="160" placeholder="Ex.: comportamento durante desumidificação"></label><label class="field"><span>Observação</span><textarea name="note" rows="5" maxlength="4000" placeholder="Descreva o que você ouviu ou observou"></textarea></label><label class="field note-only"><span>Tags</span><input name="tags" placeholder="bip, desumidificação, umidade"></label><p class="notice">Resultado: <strong>Observado pelo usuário</strong>. A correlação temporal não será apresentada como causalidade confirmada.</p><footer><button type="button" class="secondary" data-action="close-observation">Cancelar</button><button type="button" data-action="submit-observation">Registrar</button></footer></form></dialog>
 
         <dialog id="confirm-dialog"><form class="dialog-shell"><header><div><div class="eyebrow">Confirmação obrigatória</div><h2 id="confirm-title">Confirmar ação</h2></div></header><p id="confirm-message"></p><label id="confirm-code-field" class="field" hidden><span>Digite APAGAR</span><input id="confirm-code" autocomplete="off"></label><footer><button type="button" class="secondary" data-confirm="cancel">Cancelar</button><button type="button" class="danger" data-confirm="accept">Confirmar</button></footer></form></dialog>
 
@@ -884,6 +1065,13 @@
         const jump = event.target.closest("[data-tab-jump]");
         if (jump) {
           this._setActiveTab(jump.dataset.tabJump);
+          return;
+        }
+        const flowCorrelation = event.target.closest("[data-flow-correlation]");
+        if (flowCorrelation) {
+          event.preventDefault();
+          this._openFlowCorrelation(flowCorrelation.dataset.flowCorrelation)
+            .catch((error) => this._showError(error));
           return;
         }
         const action = event.target.closest("[data-action]");
@@ -1036,6 +1224,20 @@
       if (kind !== "event" && !update?.event && !update?.event_id) return;
       this._pendingEvents += Number(update?.count || 1);
       this._updatePendingBanner();
+      const event = asObject(update?.event ?? update);
+      const relevant = ["decision", "evaluation", "action", "transmission", "external", "error"]
+        .includes(String(event.category || ""))
+        || String(event.event_type || "").startsWith("localtuya.confirmed")
+        || String(event.event_type || "") === "transmission.confirmation_timeout";
+      if (relevant && this._activeTab === "overview") {
+        if (this._flowRefreshTimer) clearTimeout(this._flowRefreshTimer);
+        this._flowRefreshTimer = setTimeout(() => {
+          this._flowRefreshTimer = null;
+          if (this._connected && this._activeTab === "overview") {
+            this._loadSnapshot({ flowOnly: true }).catch((error) => this._showError(error));
+          }
+        }, 350);
+      }
       // Deliberately do not mutate list rows, filters, dialogs or form drafts here.
     }
 
@@ -1090,17 +1292,19 @@
       if (!state?.loaded || state.fingerprint !== fingerprint) await this._loadEvents(tab, { reset: true });
     }
 
-    async _loadSnapshot() {
+    async _loadSnapshot({ flowOnly = false } = {}) {
       const response = await this._ws("get_snapshot");
-      this._snapshot = asObject(response?.snapshot ?? response);
-      this._entryId = response?.entry_id ?? this._snapshot.entry_id ?? this._entryId;
+      const incoming = asObject(response?.snapshot ?? response);
+      this._snapshot = flowOnly
+        ? { ...this._snapshot, last_complete_flow: incoming.last_complete_flow }
+        : incoming;
+      this._entryId = response?.entry_id ?? incoming.entry_id ?? this._entryId;
       this._renderOverview();
-      this._renderMaintenance();
       return response;
     }
 
-    async _loadCatalog() {
-      const response = await this._ws("get_filter_catalog");
+    async _loadCatalog(filters = this._effectiveFilters()) {
+      const response = await this._ws("get_filter_catalog", { filters });
       const catalog = asObject(response?.catalog ?? response);
       const rawFields = catalog.fields;
       const fields = Array.isArray(rawFields)
@@ -1119,6 +1323,7 @@
         })),
         quick_filters: asArray(catalog.quick_filters),
         saved_filters: asArray(catalog.saved_filters),
+        count_scope_label: catalog.count_scope_label || "Registros no recorte atual",
       };
       this._populateFacetPickers();
       this._renderQuickFilters();
@@ -1348,8 +1553,13 @@
       return values.map((value) => {
         const option = normalizeOption(value);
         const explicitlyLabeled = value && typeof value === "object" && (value.label || value.name);
-        if (!explicitlyLabeled && !preserveCode.has(key)) {
-          option.label = CODE_LABELS[option.value] || humanizeCode(option.value);
+        if (!preserveCode.has(key)) {
+          const translated = presentationValue(
+            key,
+            option.value,
+            Boolean(this._settingsSaved.interface_show_technical_codes),
+          );
+          if (!explicitlyLabeled || translated !== option.value) option.label = translated;
         }
         return option;
       });
@@ -1425,6 +1635,7 @@
         await this._loadStatistics();
         this._renderStatistics();
       }
+      await this._loadCatalog(this._effectiveFilters());
     }
 
     _normalizeFilterPayload(filters) {
@@ -1750,6 +1961,15 @@
       this._renderAdvancedBuilder();
     }
 
+    async _openFlowCorrelation(correlationId) {
+      if (!correlationId) return;
+      this._filterDraft = { relevant_only: false, correlation_id: correlationId };
+      this._advancedGroups = [{ operator: "and", conditions: [{ field: "", operator: "eq", value: "" }] }];
+      this._writeFilterControls();
+      await this._applyFilters({ closePanel: true });
+      this._setActiveTab("timeline");
+    }
+
     _renderOverview() {
       if (!this.shadowRoot) return;
       const snapshot = this._snapshot || {};
@@ -1784,7 +2004,9 @@
           const article = document.createElement("article");
           article.className = `metric ${tone}`;
           article.dataset.metric = key;
-          article.innerHTML = `<ha-icon icon="${icon}"></ha-icon><div><span>${esc(label)}</span><strong class="metric-value" title="${esc(semanticValue(value))}">${esc(semanticValue(value))}</strong></div>`;
+          const field = key === "capture" ? "capture_mode" : presentationFieldForLabel(label);
+          const rendered = this._present(field, value);
+          article.innerHTML = `<ha-icon icon="${icon}"></ha-icon><div><span>${esc(label)}</span><strong class="metric-value" title="${esc(rendered)}">${esc(rendered)}</strong></div>`;
           fragment.append(article);
         });
         metricsNode.replaceChildren(fragment);
@@ -1817,16 +2039,57 @@
 
       const flowNode = this.shadowRoot.querySelector("#last-flow");
       if (flowNode) {
-        const flow = asArray(snapshot.last_complete_flow?.steps ?? snapshot.last_flow?.steps ?? snapshot.last_complete_flow ?? snapshot.last_flow);
-        const steps = this._overviewFlowSteps(flow);
+        const flow = asObject(snapshot.last_complete_flow ?? snapshot.last_flow);
+        const steps = asArray(flow.steps);
+        const title = this.shadowRoot.querySelector("#last-flow-title");
+        const meta = this.shadowRoot.querySelector("#last-flow-meta");
+        const missing = this.shadowRoot.querySelector("#last-flow-missing");
+        const correlation = this.shadowRoot.querySelector("#last-flow-correlation");
+        if (title) title.textContent = flow.terminal ? "Último fluxo completo" : "Último fluxo observado";
+        const metadata = [
+          flow.occurred_at ? this._formatDate(flow.occurred_at) : null,
+          flow.treatment ? this._present("treatment", flow.treatment) : null,
+          flow.mode ? this._present("mode", flow.mode) : null,
+          flow.state ? this._present("flow_state", flow.state) : null,
+        ].filter(Boolean);
+        if (meta) meta.textContent = metadata.join(" · ");
+        if (correlation) {
+          correlation.hidden = !flow.correlation_id;
+          correlation.dataset.flowCorrelation = flow.correlation_id || "";
+        }
         const fragment = document.createDocumentFragment();
         steps.forEach((step, index) => {
-          const item = document.createElement("div");
-          item.className = `flow-step ${esc(step.status || "unknown")}`;
-          item.title = step.fullText || step.label;
-          item.innerHTML = `<span class="flow-index">${index + 1}</span><div><strong>${esc(step.label)}</strong>${step.detail ? `<small>${esc(step.detail)}</small>` : ""}</div>${index < steps.length - 1 ? '<ha-icon icon="mdi:arrow-right"></ha-icon>' : ""}`;
+          const item = document.createElement(step.event_id ? "button" : "div");
+          if (step.event_id) {
+            item.type = "button";
+            item.dataset.eventId = step.event_id;
+          }
+          item.className = `flow-step ${esc(step.outcome || step.severity || "unknown")}`;
+          const context = [
+            step.treatment ? this._present("treatment", step.treatment) : null,
+            step.mode ? this._present("mode", step.mode) : null,
+            step.preset,
+            step.power_profile ? this._present("power_profile", step.power_profile) : null,
+            step.power_level !== null && step.power_level !== undefined ? this._present("power_level", step.power_level) : null,
+            step.protection ? this._present("protection", step.protection) : null,
+            step.audibility ? this._present("audibility", step.audibility) : null,
+            step.confirmation ? this._present("outcome", step.confirmation) : null,
+          ].filter(Boolean).join(" · ");
+          item.title = [step.summary, step.reason, context].filter(Boolean).join(" — ");
+          item.innerHTML = `<span class="flow-index">${index + 1}</span><div><strong>${esc(step.phase_label || "Etapa registrada")}</strong><small>${esc(step.summary || step.event_type || "Evento registrado")}</small>${context ? `<small>${esc(context)}</small>` : ""}</div>${index < steps.length - 1 ? '<ha-icon icon="mdi:arrow-right"></ha-icon>' : ""}`;
           fragment.append(item);
         });
+        if (!steps.length) {
+          const empty = document.createElement("div");
+          empty.className = "flow-empty";
+          empty.textContent = "Nenhuma correlação operacional registrada até agora.";
+          fragment.append(empty);
+        }
+        const missingPhases = asArray(flow.missing_phases);
+        if (missing) {
+          missing.hidden = !steps.length || !missingPhases.length;
+          missing.textContent = missing.hidden ? "" : `Não registradas: ${missingPhases.join(", ")}.`;
+        }
         flowNode.replaceChildren(fragment);
       }
 
@@ -1837,51 +2100,13 @@
       this._renderMaintenance();
     }
 
-    _overviewFlowSteps(flow) {
-      const phases = [
-        ["sensor", "Sensor mudou"],
-        ["evaluation", "Supervisor avaliou"],
-        ["decision", "Decisão calculada"],
-        ["action", "Ação verificada"],
-        ["observed", "Estado observado"],
-      ];
-      const matches = new Map();
-      asArray(flow).forEach((rawStep) => {
-        const step = typeof rawStep === "string" ? { label: rawStep } : asObject(rawStep);
-        const phase = this._flowPhase(step);
-        if (phase) matches.set(phase, step);
-      });
-      return phases.map(([phase, label]) => {
-        const match = matches.get(phase);
-        const fullText = match
-          ? semanticValue(match.label || match.summary || match.reason || match.event_type || label)
-          : "";
-        return {
-          label,
-          status: match?.status || match?.outcome || "unknown",
-          detail: fullText ? this._shortText(fullText, 92) : "",
-          fullText,
-        };
-      });
-    }
-
-    _flowPhase(step) {
-      const signature = `${step.event_type || ""} ${step.category || ""} ${step.label || ""}`.toLocaleLowerCase("pt-BR");
-      if (/localtuya|external|confirm|observ/.test(signature)) return "observed";
-      if (/transmiss|action|service|command|comando|eco_requested/.test(signature)) return "action";
-      if (/decision|decis/.test(signature)) return "decision";
-      if (/evaluation|avalia|supervisor avaliou/.test(signature)) return "evaluation";
-      if (/state|sensor|input_|mudou|alterou/.test(signature)) return "sensor";
-      return null;
-    }
-
     _definitionFragment(entries) {
       const fragment = document.createDocumentFragment();
       entries.forEach(([label, value]) => {
         const dt = document.createElement("dt");
         dt.textContent = label;
         const dd = document.createElement("dd");
-        dd.textContent = semanticValue(value);
+        dd.textContent = this._present(presentationFieldForLabel(label), value);
         fragment.append(dt, dd);
       });
       return fragment;
@@ -1901,7 +2126,8 @@
         button.type = "button";
         button.className = "compact-event";
         button.dataset.eventId = getEventId(event);
-        button.innerHTML = `<time>${esc(this._formatDate(event.occurred_at_local ?? event.occurred_at))}</time><span class="severity-dot ${esc(event.severity || "info")}"></span><strong>${esc(event.summary || event.event_type || "Evento")}</strong><small>${esc(event.entity_id || event.source_component || event.category || "")}</small><ha-icon icon="mdi:chevron-right"></ha-icon>`;
+        const source = event.entity_id || this._present("category", event.source_component || event.category || "");
+        button.innerHTML = `<time>${esc(this._formatDate(event.occurred_at_local ?? event.occurred_at))}</time><span class="severity-dot ${esc(event.severity || "info")}"></span><strong>${esc(event.summary || event.event_type || "Evento")}</strong><small>${esc(source)}</small><ha-icon icon="mdi:chevron-right"></ha-icon>`;
         fragment.append(button);
       });
       return fragment;
@@ -1980,20 +2206,26 @@
         summary: () => `<strong>${esc(event.summary || event.event_type || "Evento")}</strong>${technical && event.event_type ? `<small>${esc(event.event_type)}</small>` : ""}`,
         event_type: () => `<code>${esc(event.event_type || "—")}</code>`,
         actor: () => esc(event.user_name || event.actor_name || event.actor_type || "Sistema / não determinado"),
-        origin: () => esc(event.origin_label || event.origin_class || event.source_component || "—"),
+        origin: () => esc(this._present("origin", event.origin_label || event.origin_class || event.source_component || "—")),
         entity_id: () => `<code>${esc(event.entity_id || event.source_entity_id || "—")}</code>`,
         before: () => esc(this._snapshotSummary(event.before_json ?? event.before)),
         after: () => esc(this._snapshotSummary(event.after_json ?? event.after)),
         outcome: () => this._chip(event.outcome || "unknown", event.outcome_label || event.outcome || "Não informado", "outcome"),
         correlation_id: () => `<code title="${esc(event.correlation_id || "")}">${esc(this._shortId(event.correlation_id))}</code>`,
-        mode: () => esc(event.climate_mode || event.mode || "—"),
-        treatment: () => esc(event.treatment || "—"),
+        mode: () => esc(this._present("mode", event.climate_mode || event.mode || "—")),
+        treatment: () => esc(this._present("treatment", event.treatment || "—")),
         preset: () => esc(event.preset || "—"),
-        power_profile: () => esc(event.power_profile || "—"),
+        power_profile: () => esc(
+          event.power_profile
+            ? this._present("power_profile", event.power_profile)
+            : event.power_level !== null && event.power_level !== undefined
+              ? this._present("power_level", event.power_level)
+              : "—",
+        ),
         audibility: () => this._chip(event.expected_audibility || "unknown", event.audibility_label || event.expected_audibility || "Não determinada", "audibility"),
       };
       if (cells[column]) return cells[column]();
-      return esc(semanticValue(event[column]));
+      return esc(this._present(column, event[column]));
     }
 
     _decisionFragment(events) {
@@ -2008,7 +2240,7 @@
         card.className = "decision-card";
         card.innerHTML = `
           <header><div><time>${esc(this._formatDate(event.occurred_at_local ?? event.occurred_at))}</time><h3>${esc(event.summary || "Avaliação do Supervisor")}</h3></div>${this._chip(event.outcome || "calculated", event.outcome_label || event.outcome || "Calculada", "outcome")}</header>
-          <div class="decision-columns"><section><span class="section-label">ENTRADAS</span><dl>${this._dlHtml([["Gatilho", event.trigger_label || event.trigger || details.trigger], ["Temperatura", details.temperature ?? details.inputs?.temperature], ["Umidade", details.humidity ?? details.inputs?.humidity], ["Agenda", event.agenda ?? details.agenda]])}</dl></section><section><span class="section-label">DEMANDAS</span><dl>${this._dlHtml([["Heat", demands.heat], ["Cool", demands.cool], ["Dry", demands.dry], ["Prioridade", details.priority]])}</dl></section><section><span class="section-label">DECISÃO</span><dl>${this._dlHtml([["Anterior", details.previous_decision ?? event.before_treatment], ["Calculada", event.treatment ?? details.treatment], ["Preset", event.preset ?? details.preset], ["Potência", event.power_profile ?? details.power_profile]])}</dl></section><section><span class="section-label">RESULTADO</span><dl>${this._dlHtml([["Ação", event.action_name ?? details.action], ["Motivo", event.reason ?? details.reason], ["Proteção", event.protection ?? details.protection], ["Correlação", this._shortId(event.correlation_id)]])}</dl></section></div>
+          <div class="decision-columns"><section><span class="section-label">ENTRADAS</span><dl>${this._dlHtml([["Gatilho", event.trigger_label || event.trigger || details.trigger], ["Temperatura", details.temperature ?? details.inputs?.temperature], ["Umidade", details.humidity ?? details.inputs?.humidity], ["Agenda", event.agenda ?? details.agenda, "agenda"]])}</dl></section><section><span class="section-label">DEMANDAS</span><dl>${this._dlHtml([["Aquecimento", demands.heat], ["Refrigeração", demands.cool], ["Desumidificação", demands.dry], ["Prioridade", details.priority]])}</dl></section><section><span class="section-label">DECISÃO</span><dl>${this._dlHtml([["Anterior", details.previous_decision ?? event.before_treatment], ["Calculada", event.treatment ?? details.treatment, "treatment"], ["Preset", event.preset ?? details.preset], ["Potência", event.power_profile ?? details.power_profile ?? event.power_level ?? details.power_level, event.power_profile ?? details.power_profile ? "power_profile" : "power_level"]])}</dl></section><section><span class="section-label">RESULTADO</span><dl>${this._dlHtml([["Ação", event.action_name ?? details.action], ["Motivo", event.reason ?? details.reason], ["Proteção", event.protection ?? details.protection, "protection"], ["Correlação", this._shortId(event.correlation_id)]])}</dl></section></div>
           <footer><button type="button" class="secondary" data-event-id="${esc(getEventId(event))}">Ver avaliação completa</button></footer>`;
         grid.append(card);
       });
@@ -2052,7 +2284,7 @@
         card.innerHTML = `
           <header><div class="chip-row">${this._chip(event.expected_audibility || "unknown", event.audibility_label || event.expected_audibility || "Não determinada", "audibility")}${this._chip(event.outcome || "requested", event.outcome_label || event.outcome || "Solicitada", "outcome")}</div><time>${esc(this._formatDate(event.occurred_at_local ?? event.occurred_at))}</time></header>
           <h3>${esc(event.action_name || event.service || event.event_type || "Ação")}</h3><p>${esc(event.summary || "Solicitação observada no Home Assistant")}</p>
-          <dl>${this._dlHtml([["Solicitado por", event.user_name || event.actor_name || event.source_component], ["Modo", event.mode ?? requested.mode], ["Alvo", requested.target_temperature ?? requested.temperature], ["Fan", requested.fan ?? requested.fan_mode], ["Swing", requested.swing ?? requested.swing_mode], ["Confirmação", details.confirmation ?? event.confirmation], ["Tempo até confirmação", formatDuration(details.confirmation_delay_ms ?? event.confirmation_delay_ms)], ["Correlação", this._shortId(event.correlation_id)]])}</dl>
+          <dl>${this._dlHtml([["Solicitado por", event.user_name || event.actor_name || event.source_component], ["Modo", event.mode ?? requested.mode, "mode"], ["Alvo", requested.target_temperature ?? requested.temperature], ["Ventilação", requested.fan ?? requested.fan_mode], ["Swing", requested.swing ?? requested.swing_mode], ["Confirmação", details.confirmation ?? event.confirmation, "outcome"], ["Tempo até confirmação", formatDuration(details.confirmation_delay_ms ?? event.confirmation_delay_ms)], ["Correlação", this._shortId(event.correlation_id)]])}</dl>
           <p class="layer-note">Representa uma <strong>solicitação do Home Assistant</strong>; não confirma emissão ou recepção física do frame.</p>
           <footer><button type="button" class="secondary" data-event-id="${esc(getEventId(event))}">Dados e correlação</button></footer>`;
         grid.append(card);
@@ -2127,12 +2359,12 @@
       if (!container) return;
       const source = this._statistics || {};
       const groups = [
-        ["Eventos por hora", source.events_by_hour ?? source.by_hour], ["Eventos por categoria", source.events_by_category ?? source.by_category],
-        ["Eventos por tipo", source.events_by_type ?? source.by_type], ["Eventos por origem", source.events_by_origin ?? source.by_origin],
-        ["Eventos por ator", source.events_by_actor ?? source.by_actor], ["Eventos por modo", source.events_by_mode ?? source.by_mode],
-        ["Erros por tipo", source.errors_by_type], ["Top 10 produtores", source.top_producers],
-        ["Por tratamento", source.by_treatment], ["Por preset", source.by_preset],
-        ["Por potência", source.by_power], ["Por audibilidade", source.by_audibility],
+        ["Eventos por hora", source.events_by_hour ?? source.by_hour, "generic"], ["Eventos por categoria", source.events_by_category ?? source.by_category, "category"],
+        ["Eventos por tipo", source.events_by_type ?? source.by_type, "event_type"], ["Eventos por origem", source.events_by_origin ?? source.by_origin, "origin"],
+        ["Eventos por ator", source.events_by_actor ?? source.by_actor, "generic"], ["Eventos por modo", source.events_by_mode ?? source.by_mode, "mode"],
+        ["Erros por tipo", source.errors_by_type, "event_type"], ["10 maiores produtores", source.top_producers, "generic"],
+        ["Por tratamento", source.by_treatment, "treatment"], ["Por preset", source.by_preset, "generic"],
+        ["Por potência", source.by_power, "power_profile"], ["Por audibilidade", source.by_audibility, "audibility"],
       ];
       const summary = [
         ["Eventos", source.total_events], ["Avaliações", source.total_evaluations],
@@ -2145,14 +2377,14 @@
       const fragment = document.createDocumentFragment();
       const summaryCard = document.createElement("article");
       summaryCard.className = "stat-card stat-summary";
-      summaryCard.innerHTML = `<h3>Resumo</h3><div class="stat-summary-grid">${summary.map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value ?? 0)}</strong></div>`).join("")}</div>`;
+      summaryCard.innerHTML = `<h3>Resumo</h3><div class="stat-summary-grid">${summary.map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(new Intl.NumberFormat("pt-BR").format(Number(value ?? 0)))}</strong></div>`).join("")}</div>`;
       fragment.append(summaryCard);
-      groups.forEach(([title, data]) => {
-        const rows = this._normalizeAggregation(data).slice(0, title.startsWith("Top") ? 10 : 24);
+      groups.forEach(([title, data, field]) => {
+        const rows = this._normalizeAggregation(data).slice(0, title.includes("maiores") ? 10 : 24);
         const card = document.createElement("article");
         card.className = "stat-card";
         const max = Math.max(1, ...rows.map((item) => Number(item.count || item.value || 0)));
-        card.innerHTML = `<h3>${esc(title)}</h3><div class="bars">${rows.length ? rows.map((item) => { const value = Number(item.count ?? item.total ?? 0); const label = item.label ?? item.key ?? item.value ?? "—"; return `<div class="bar-row"><span title="${esc(label)}">${esc(label)}</span><div><i style="width:${Math.max(2, (value / max) * 100)}%"></i></div><strong>${value}</strong></div>`; }).join("") : '<div class="empty-small">Sem dados</div>'}</div>`;
+        card.innerHTML = `<h3>${esc(title)}</h3><div class="bars">${rows.length ? rows.map((item) => { const value = Number(item.count ?? item.total ?? 0); const rawLabel = item.key ?? item.value ?? item.label ?? "—"; const label = this._present(field, rawLabel); return `<div class="bar-row"><span title="${esc(label)}">${esc(label)}</span><div><i style="width:${Math.max(2, (value / max) * 100)}%"></i></div><strong>${new Intl.NumberFormat("pt-BR").format(value)}</strong></div>`; }).join("") : '<div class="empty-small">Sem dados</div>'}</div>`;
         fragment.append(card);
       });
       container.replaceChildren(fragment);
@@ -2197,8 +2429,8 @@
       const event = this._detailEvent || {};
       this._nodes.detailLoading.hidden = true;
       this.shadowRoot.querySelector("#detail-type").textContent = this._settingsSaved.interface_show_technical_codes
-        ? `${event.category || "evento"} · ${event.event_type || ""}`
-        : humanizeCode(event.category || "evento");
+        ? `${this._present("category", event.category || "evento")} · ${event.event_type || ""}`
+        : this._present("category", event.category || "evento");
       this.shadowRoot.querySelector("#detail-title").textContent = event.summary || "Detalhes do evento";
       this.shadowRoot.querySelector("#detail-chips").innerHTML = `${this._chip(event.severity || "info", event.severity || "Informação", "severity")}${this._chip(event.outcome || "unknown", event.outcome_label || event.outcome || "Não informado", "outcome")}${event.expected_audibility ? this._chip(event.expected_audibility, event.audibility_label || event.expected_audibility, "audibility") : ""}`;
       const wrapper = document.createElement("div");
@@ -2231,13 +2463,13 @@
       if (before === undefined && after === undefined) lifecycle.textContent = "Este tipo de evento não possui snapshots Antes/Depois. Chamadas de ação e eventos de manutenção usam outras seções técnicas.";
       else if (before === null) lifecycle.textContent = "Antes = null: a entidade ainda não existia.";
       else if (after === null) lifecycle.textContent = "Depois = null: a entidade foi removida.";
-      else lifecycle.textContent = "Snapshots capturados atomicamente no state_changed; valores unknown e unavailable são preservados literalmente.";
+      else lifecycle.textContent = "Snapshots capturados atomicamente em state_changed; o JSON técnico preserva os valores canônicos.";
       fragment.append(lifecycle);
       const tableWrap = document.createElement("div");
       tableWrap.className = "table-wrap comparison-wrap";
       const showUnchanged = Boolean(this._settingsSaved.interface_show_unchanged_attributes);
       const visible = showUnchanged ? rows : rows.filter((row) => row.changed);
-      tableWrap.innerHTML = `<table class="comparison-table"><thead><tr><th>Campo</th><th>Antes</th><th>Depois</th><th>Mudança</th></tr></thead><tbody>${visible.map((row) => `<tr class="${row.changed ? "changed" : "unchanged"}"><th>${esc(row.field)}</th><td>${this._comparisonCellHtml(row.before)}</td><td>${this._comparisonCellHtml(row.after)}</td><td>${row.changed ? "alterado" : "—"}</td></tr>`).join("") || '<tr><td colspan="4">Nenhuma diferença estruturada disponível.</td></tr>'}</tbody></table>`;
+      tableWrap.innerHTML = `<table class="comparison-table"><thead><tr><th>Campo</th><th>Antes</th><th>Depois</th><th>Mudança</th></tr></thead><tbody>${visible.map((row) => `<tr class="${row.changed ? "changed" : "unchanged"}"><th>${esc(row.field)}</th><td>${this._comparisonCellHtml(row.before, row.field)}</td><td>${this._comparisonCellHtml(row.after, row.field)}</td><td>${row.changed ? "Alterado" : "—"}</td></tr>`).join("") || '<tr><td colspan="4">Nenhuma diferença estruturada disponível.</td></tr>'}</tbody></table>`;
       fragment.append(tableWrap);
       const full = document.createElement("details");
       full.innerHTML = `<summary>Mostrar estado completo</summary><div class="json-columns"><div><h4>Antes</h4><pre>${esc(this._pretty(before))}</pre></div><div><h4>Depois</h4><pre>${esc(this._pretty(after))}</pre></div><div><h4>Diferença</h4><pre>${esc(this._pretty(diff))}</pre></div></div>`;
@@ -2250,9 +2482,9 @@
       const details = asObject(event.details_json ?? event.details);
       return `<div class="detail-grid">
         ${this._detailSectionHtml("Ocorrência", [["Horário", this._formatDate(event.occurred_at_local ?? event.occurred_at)], ["Recebido em", this._formatDate(event.received_at)], ["Entidade", event.entity_id], ["Domínio", event.domain], ["Componente", event.source_component]])}
-        ${this._detailSectionHtml("Ator e origem", [["Tipo de ator", event.actor_type], ["Ator", event.actor_name], ["Usuário", event.user_name], ["User ID", event.user_id], ["Origem", event.origin_label || event.origin_class], ["Confiança", event.origin_confidence]])}
+        ${this._detailSectionHtml("Ator e origem", [["Tipo de ator", event.actor_type, "origin"], ["Ator", event.actor_name], ["Usuário", event.user_name], ["ID do usuário", event.user_id], ["Origem", event.origin_label || event.origin_class, "origin"], ["Confiança", event.origin_confidence]])}
         ${this._detailSectionHtml("Contexto Home Assistant", [["Context ID", event.context_id], ["Parent context", event.parent_context_id], ["Correlation ID", event.correlation_id], ["Evaluation ID", event.evaluation_id], ["Classificação", event.correlation_class]])}
-        ${this._detailSectionHtml("Supervisor", [["Gatilho", evaluation.trigger || details.trigger], ["Preset", event.preset ?? evaluation.presets], ["Potência", event.power_profile ?? evaluation.powers], ["Agenda", event.agenda ?? evaluation.agenda], ["Limites", event.limits ?? evaluation.limits], ["Proteções", event.protection ?? evaluation.protections], ["Motivo", event.reason ?? evaluation.reason]])}
+        ${this._detailSectionHtml("Supervisor", [["Gatilho", evaluation.trigger || details.trigger], ["Preset", event.preset ?? evaluation.presets], ["Potência", event.power_profile ?? event.power_level ?? evaluation.powers, event.power_profile ? "power_profile" : event.power_level !== null && event.power_level !== undefined ? "power_level" : "generic"], ["Agenda", event.agenda ?? evaluation.agenda, "agenda"], ["Limites", event.limits ?? evaluation.limits], ["Proteções", event.protection ?? evaluation.protections, "protection"], ["Motivo", event.reason ?? evaluation.reason]])}
       </div>`;
     }
 
@@ -2284,10 +2516,10 @@
         : `<pre>${esc(this._pretty(value))}</pre>`;
     }
 
-    _comparisonCellHtml(value) {
+    _comparisonCellHtml(value, field = "generic") {
       const rendered = value && typeof value === "object"
         ? this._pretty(value)
-        : semanticValue(value);
+        : this._present(field, value);
       return `<code class="comparison-value">${esc(rendered)}</code>`;
     }
 
@@ -2309,7 +2541,7 @@
           button.type = "button";
           button.className = "related-event secondary";
           button.dataset.eventId = getEventId(event);
-          button.innerHTML = `<time>${esc(this._formatDate(event.occurred_at_local ?? event.occurred_at))}</time><strong>${esc(event.summary || event.event_type || "Evento")}</strong><span>${esc(event.correlation_class || event.outcome || "")}</span>`;
+          button.innerHTML = `<time>${esc(this._formatDate(event.occurred_at_local ?? event.occurred_at))}</time><strong>${esc(event.summary || event.event_type || "Evento")}</strong><span>${esc(this._present("outcome", event.correlation_class || event.outcome || ""))}</span>`;
           list.append(button);
         });
       }
@@ -2332,11 +2564,27 @@
     }
 
     _dlHtml(rows) {
-      return rows.filter(([, value]) => value !== undefined && value !== null && value !== "").map(([label, value]) => `<dt>${esc(label)}</dt><dd>${esc(semanticValue(value))}</dd>`).join("") || "<dd>Não informado</dd>";
+      return rows.filter(([, value]) => value !== undefined && value !== null && value !== "").map(([label, value, field]) => `<dt>${esc(label)}</dt><dd>${esc(this._present(field || presentationFieldForLabel(label), value))}</dd>`).join("") || "<dd>Não informado</dd>";
+    }
+
+    _present(field, value) {
+      return presentationValue(
+        field,
+        value,
+        Boolean(this._settingsSaved.interface_show_technical_codes),
+      );
     }
 
     _chip(value, label, kind = "generic") {
-      return `<span class="chip ${esc(kind)} value-${esc(String(value).replace(/[^a-zA-Z0-9_-]/g, "-"))}">${esc(label)}</span>`;
+      const raw = String(value ?? "");
+      const supplied = label !== undefined && label !== null && String(label) !== raw
+        ? presentationValue(kind, label)
+        : presentationValue(kind, value);
+      const rendered = this._settingsSaved.interface_show_technical_codes
+        && supplied !== raw
+        ? `${supplied} · ${raw}`
+        : supplied;
+      return `<span class="chip ${esc(kind)} value-${esc(raw.replace(/[^a-zA-Z0-9_-]/g, "-"))}">${esc(rendered)}</span>`;
     }
 
     _snapshotSummary(value) {
@@ -2345,7 +2593,8 @@
       const snapshot = asObject(value);
       const flat = flattenSnapshot(snapshot) || {};
       const fields = ["state", "power", "mode", "temperature", "target_temperature", "fan", "fan_mode", "swing", "preset", "power_profile"];
-      const parts = fields.filter((key) => flat[key] !== undefined).slice(0, 3).map((key) => `${key}: ${semanticValue(flat[key])}`);
+      const fieldLabels = { state: "Estado", power: "Power", mode: "Modo", temperature: "Temperatura", target_temperature: "Temperatura-alvo", fan: "Ventilação", fan_mode: "Ventilação", swing: "Swing", preset: "Preset", power_profile: "Potência" };
+      const parts = fields.filter((key) => flat[key] !== undefined).slice(0, 3).map((key) => `${fieldLabels[key] || key}: ${this._present(key === "power" ? "generic" : key, flat[key])}`);
       return parts.length ? parts.join(" · ") : semanticValue(value);
     }
 
@@ -2875,7 +3124,7 @@
         .advanced-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.advanced-head p{color:var(--secondary-text-color)}.advanced-builder{display:grid;gap:10px}.filter-group{border:1px solid var(--divider-color);border-radius:13px;padding:11px;background:var(--card-background-color)}.filter-group>header{display:flex;justify-content:space-between;align-items:end;gap:10px}.filter-group>header label{font-size:.77rem;color:var(--secondary-text-color)}.conditions{display:grid;gap:8px;margin-top:10px}.condition-row{display:grid;grid-template-columns:minmax(140px,1.2fr) minmax(125px,.8fr) minmax(150px,1fr) auto;gap:8px;align-items:end}.condition-row label{display:grid;gap:4px;font-size:.75rem;color:var(--secondary-text-color)}
         main{padding:18px}.tab-panel{min-height:360px}.panel-head,.section-title{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}.panel-head h2,.section-title h2{margin:3px 0}.panel-head p{margin:4px 0 0;color:var(--secondary-text-color);max-width:860px}.view-meta{display:flex;gap:10px;color:var(--secondary-text-color);font-size:.8rem}.loading-indicator{display:inline-flex;align-items:center;gap:4px}.loading-indicator ha-icon{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
         .metrics{display:grid;grid-template-columns:repeat(7,minmax(125px,1fr));gap:9px;margin-bottom:14px}.metric{display:flex;align-items:center;gap:9px;padding:11px;border-radius:13px;background:var(--secondary-background-color);min-width:0;border-left:3px solid var(--diag-blue)}.metric ha-icon{color:var(--diag-blue)}.metric>div{min-width:0}.metric span{display:block;color:var(--secondary-text-color);font-size:.69rem}.metric strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.88rem;margin-top:2px}.metric.success{border-color:var(--diag-green)}.metric.success ha-icon{color:var(--diag-green)}.metric.error{border-color:var(--diag-red)}.metric.error ha-icon{color:var(--diag-red)}.metric.orange{border-color:var(--diag-orange)}.metric.orange ha-icon{color:var(--diag-orange)}.metric.purple{border-color:var(--diag-purple)}.metric.purple ha-icon{color:var(--diag-purple)}.metric.cyan{border-color:var(--diag-cyan)}.metric.cyan ha-icon{color:var(--diag-cyan)}
-        .overview-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(270px,.8fr);gap:14px;margin-bottom:14px;align-items:start}.surface{padding:16px;border:1px solid var(--divider-color);border-radius:15px;background:var(--secondary-background-color);min-width:0}.flow-surface{min-width:0}.section-title>ha-icon{color:var(--diag-cyan);--mdc-icon-size:30px}.section-subtitle{margin:5px 0 0;color:var(--secondary-text-color);font-size:.78rem;line-height:1.4}.flow{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:7px;overflow:auto;padding:5px 0;scrollbar-width:thin}.flow-step{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;min-width:0;min-height:82px;max-height:104px;overflow:hidden;padding:10px;border-radius:12px;background:var(--card-background-color);border:1px solid var(--divider-color)}.flow-step>ha-icon{color:var(--secondary-text-color);flex:0 0 auto}.flow-step div{min-width:0;overflow:hidden}.flow-step strong,.flow-step small{display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.flow-step strong{-webkit-line-clamp:2;line-clamp:2}.flow-step small{-webkit-line-clamp:2;line-clamp:2;color:var(--secondary-text-color);margin-top:3px;font-size:.73rem;line-height:1.35}.flow-index{display:flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:50%;background:var(--diag-blue);color:#fff;font-weight:700;flex:0 0 25px}.flow-step.confirmed .flow-index,.flow-step.success .flow-index{background:var(--diag-green)}.flow-step.blocked .flow-index{background:var(--diag-yellow)}.definition-list,.detail-section dl,.action-card dl,.external-card dl,.anomaly-card dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 12px;margin:0}.definition-list dt,.detail-section dt,.action-card dt,.external-card dt,.anomaly-card dt{font-size:.75rem;color:var(--secondary-text-color)}.definition-list dd,.detail-section dd,.action-card dd,.external-card dd,.anomaly-card dd{margin:0;overflow-wrap:anywhere;line-height:1.4}.compact-events{display:grid;gap:5px}.compact-event{display:grid;grid-template-columns:auto auto minmax(180px,1fr) minmax(100px,.5fr) auto;align-items:center;text-align:left;gap:9px;background:var(--card-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}.compact-event time,.compact-event small{font-size:.74rem;color:var(--secondary-text-color)}.severity-dot{width:8px;height:8px;border-radius:50%;background:var(--diag-blue)}.severity-dot.warning{background:var(--diag-yellow)}.severity-dot.error,.severity-dot.critical{background:var(--diag-red)}.severity-dot.success{background:var(--diag-green)}
+        .overview-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(270px,.8fr);gap:14px;margin-bottom:14px;align-items:start}.surface{padding:16px;border:1px solid var(--divider-color);border-radius:15px;background:var(--secondary-background-color);min-width:0}.flow-surface{min-width:0}.section-title>ha-icon,.flow-head-actions>ha-icon{color:var(--diag-cyan);--mdc-icon-size:30px}.section-subtitle{margin:5px 0 0;color:var(--secondary-text-color);font-size:.78rem;line-height:1.4}.flow-head-actions{display:flex;align-items:center;gap:8px}.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:7px;overflow:auto;padding:5px 0;scrollbar-width:thin}.flow-step{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;text-align:left;color:var(--primary-text-color);gap:8px;min-width:0;min-height:92px;max-height:150px;overflow:hidden;padding:10px;border-radius:12px;background:var(--card-background-color);border:1px solid var(--divider-color)}.flow-step>ha-icon{color:var(--secondary-text-color);flex:0 0 auto}.flow-step div{min-width:0;overflow:hidden}.flow-step strong,.flow-step small{display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.flow-step strong{-webkit-line-clamp:2;line-clamp:2}.flow-step small{-webkit-line-clamp:2;line-clamp:2;color:var(--secondary-text-color);margin-top:3px;font-size:.73rem;line-height:1.35}.flow-index{display:flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:50%;background:var(--diag-blue);color:#fff;font-weight:700;flex:0 0 25px}.flow-step.confirmed .flow-index,.flow-step.confirmed_by_localtuya .flow-index,.flow-step.success .flow-index,.flow-step.completed .flow-index{background:var(--diag-green)}.flow-step.blocked .flow-index,.flow-step.suppressed .flow-index{background:var(--diag-yellow)}.flow-missing{margin:7px 0 0;padding:8px 10px;border-radius:9px;background:color-mix(in srgb,var(--diag-yellow) 9%,var(--card-background-color));color:var(--secondary-text-color);font-size:.75rem}.flow-empty{grid-column:1/-1;padding:14px;border:1px dashed var(--divider-color);border-radius:10px;color:var(--secondary-text-color);text-align:center}.definition-list,.detail-section dl,.action-card dl,.external-card dl,.anomaly-card dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 12px;margin:0}.definition-list dt,.detail-section dt,.action-card dt,.external-card dt,.anomaly-card dt{font-size:.75rem;color:var(--secondary-text-color)}.definition-list dd,.detail-section dd,.action-card dd,.external-card dd,.anomaly-card dd{margin:0;overflow-wrap:anywhere;line-height:1.4}.compact-events{display:grid;gap:5px}.compact-event{display:grid;grid-template-columns:auto auto minmax(180px,1fr) minmax(100px,.5fr) auto;align-items:center;text-align:left;gap:9px;background:var(--card-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}.compact-event time,.compact-event small{font-size:.74rem;color:var(--secondary-text-color)}.severity-dot{width:8px;height:8px;border-radius:50%;background:var(--diag-blue)}.severity-dot.debug{background:var(--secondary-text-color)}.severity-dot.warning{background:var(--diag-yellow)}.severity-dot.error,.severity-dot.critical{background:var(--diag-red)}.severity-dot.success{background:var(--diag-green)}
         .table-wrap{overflow:auto;border:1px solid var(--divider-color);border-radius:14px}.event-table,.comparison-table{border-collapse:collapse;width:100%}.event-table{min-width:1450px}.event-table thead,.comparison-table thead{position:sticky;top:0;z-index:2;background:var(--card-background-color)}.event-table th,.event-table td,.comparison-table th,.comparison-table td{padding:10px;border-bottom:1px solid var(--divider-color);text-align:left;vertical-align:top;font-size:.78rem}.event-table tbody tr{cursor:pointer}.event-table tbody tr:hover{background:color-mix(in srgb,var(--diag-cyan) 7%,transparent)}.event-table tr.anomaly{box-shadow:inset 4px 0 0 var(--diag-red)}.event-table tr.external{background:color-mix(in srgb,var(--diag-cyan) 4%,transparent)}.event-table strong,.event-table small{display:block}.event-table small{margin-top:3px;color:var(--secondary-text-color)}code{font-family:var(--code-font-family,monospace);font-size:.76rem;overflow-wrap:anywhere;color:var(--primary-text-color)}
         :host([data-density="compact"]) .event-table th,:host([data-density="compact"]) .event-table td{padding:6px 8px;font-size:.73rem}:host([data-density="compact"]) .decision-card,:host([data-density="compact"]) .action-card,:host([data-density="compact"]) .state-change-card,:host([data-density="compact"]) .external-card,:host([data-density="compact"]) .observation-card{padding:10px!important}
         .chip-row{display:flex;gap:5px;flex-wrap:wrap}.chip{display:inline-flex;align-items:center;border-radius:999px;padding:3px 7px;font-size:.68rem;background:var(--secondary-background-color);border:1px solid var(--divider-color);white-space:nowrap}.chip.severity.value-warning{color:var(--diag-yellow);border-color:var(--diag-yellow)}.chip.severity.value-error,.chip.severity.value-critical{color:var(--diag-red);border-color:var(--diag-red)}.chip.severity.value-success{color:var(--diag-green);border-color:var(--diag-green)}.chip.audibility.value-audible_expected{color:var(--diag-orange);border-color:var(--diag-orange)}.chip.audibility.value-silent_expected,.chip.origin{color:var(--diag-cyan);border-color:color-mix(in srgb,var(--diag-cyan) 60%,var(--divider-color))}.chip.outcome.value-confirmed,.chip.outcome.value-success,.chip.outcome.value-resolved{color:var(--diag-green);border-color:var(--diag-green)}.chip.outcome.value-blocked,.chip.outcome.value-suppressed,.chip.outcome.value-acknowledged{color:var(--diag-yellow);border-color:var(--diag-yellow)}.chip.outcome.value-failed,.chip.outcome.value-error{color:var(--diag-red);border-color:var(--diag-red)}.chip.category,.chip.field{color:var(--diag-purple);border-color:color-mix(in srgb,var(--diag-purple) 55%,var(--divider-color))}
@@ -2890,7 +3139,7 @@
         :host([data-detail-mode="panel"]) #event-dialog{position:fixed;inset:0 0 0 auto;margin:0;width:min(920px,100vw);height:100dvh;max-height:none;max-width:100vw;border-radius:18px 0 0 18px;overflow:hidden}:host([data-detail-mode="panel"]) #event-dialog::backdrop{background:rgba(0,0,0,.22)}:host([data-detail-mode="panel"]) #event-dialog .dialog-shell{height:100%;min-height:0}
         @container(max-width:1180px){.metrics{grid-template-columns:repeat(4,minmax(125px,1fr))}.filter-grid,.settings-grid{grid-template-columns:repeat(3,minmax(150px,1fr))}.statistics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stat-summary-grid{grid-template-columns:repeat(4,1fr)}}
         @container(max-width:820px){.hero{display:block}.hero-actions{margin-top:14px}.query-toolbar{grid-template-columns:minmax(0,1fr) auto}.saved-select,.query-toolbar>.icon-button{display:none}.filter-grid,.settings-grid{grid-template-columns:repeat(2,minmax(140px,1fr))}.metrics{grid-template-columns:repeat(3,minmax(110px,1fr))}.overview-layout,.export-layout{grid-template-columns:1fr}.decision-grid,.action-grid,.anomaly-grid,.statistics-grid{grid-template-columns:1fr}.stat-summary-grid{grid-template-columns:repeat(3,1fr)}.external-card{grid-template-columns:auto minmax(0,1fr)}.external-card>button{grid-column:2}.observation-card{grid-template-columns:auto minmax(0,1fr)}.observation-actions{grid-column:2;display:flex}.toggle-grid{grid-template-columns:repeat(2,minmax(150px,1fr))}.json-columns{grid-template-columns:1fr}.detail-grid{grid-template-columns:1fr}}
-        @container(max-width:560px){main{padding:10px}.hero{padding:16px}.tabs{padding:8px}.tab span{display:none}.tab{padding:8px}.query-toolbar{padding:10px;grid-template-columns:1fr}.query-toolbar>button{width:100%}.quick-filters{padding:4px 10px 10px}.filter-panel{margin:0 10px 12px}.filter-panel-head,.filter-footer{display:block}.filter-panel-head .button-row,.filter-footer .button-row{margin-top:10px}.filter-grid,.settings-grid,.toggle-grid{grid-template-columns:1fr}.condition-row{grid-template-columns:1fr auto}.condition-row label{grid-column:1}.condition-row button{grid-column:2;grid-row:1}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metric{padding:9px}.flow{grid-template-columns:repeat(5,minmax(180px,1fr))}.flow-step{min-width:180px}.compact-event{grid-template-columns:auto auto minmax(140px,1fr) auto}.compact-event small{display:none}.decision-columns{grid-template-columns:1fr}.before-after{grid-template-columns:1fr}.before-after>ha-icon{transform:rotate(90deg);justify-self:center}.external-card,.observation-card{grid-template-columns:1fr}.external-icon{display:none}.external-card>button,.observation-actions{grid-column:1}.stat-summary-grid{grid-template-columns:repeat(2,1fr)}.pagination{display:grid;grid-template-columns:1fr 1fr}.pagination label{grid-column:1/-1}.panel-head{display:block}.panel-head>.button-row,.view-meta{margin-top:10px}.detail-tabs button{font-size:.75rem;padding:8px}.dialog-shell{padding:13px}.comparison-wrap{overflow-x:auto}.comparison-table{min-width:620px}.related-event{grid-template-columns:1fr}.sticky-form-actions{flex-wrap:wrap}.sticky-form-actions button{flex:1}.hero-actions button{width:100%}}
+        @container(max-width:560px){main{padding:10px}.hero{padding:16px}.tabs{padding:8px}.tab span{display:none}.tab{padding:8px}.query-toolbar{padding:10px;grid-template-columns:1fr}.query-toolbar>button{width:100%}.quick-filters{padding:4px 10px 10px}.filter-panel{margin:0 10px 12px}.filter-panel-head,.filter-footer{display:block}.filter-panel-head .button-row,.filter-footer .button-row{margin-top:10px}.filter-grid,.settings-grid,.toggle-grid{grid-template-columns:1fr}.condition-row{grid-template-columns:1fr auto}.condition-row label{grid-column:1}.condition-row button{grid-column:2;grid-row:1}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metric{padding:9px}.flow{display:flex;overflow-x:auto}.flow-step{min-width:210px}.flow-head-actions{align-items:flex-end;flex-direction:column-reverse}.compact-event{grid-template-columns:auto auto minmax(140px,1fr) auto}.compact-event small{display:none}.decision-columns{grid-template-columns:1fr}.before-after{grid-template-columns:1fr}.before-after>ha-icon{transform:rotate(90deg);justify-self:center}.external-card,.observation-card{grid-template-columns:1fr}.external-icon{display:none}.external-card>button,.observation-actions{grid-column:1}.stat-summary-grid{grid-template-columns:repeat(2,1fr)}.pagination{display:grid;grid-template-columns:1fr 1fr}.pagination label{grid-column:1/-1}.panel-head{display:block}.panel-head>.button-row,.view-meta{margin-top:10px}.detail-tabs button{font-size:.75rem;padding:8px}.dialog-shell{padding:13px}.comparison-wrap{overflow-x:auto}.comparison-table{min-width:620px}.related-event{grid-template-columns:1fr}.sticky-form-actions{flex-wrap:wrap}.sticky-form-actions button{flex:1}.hero-actions button{width:100%}}
         @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
       `;
     }
