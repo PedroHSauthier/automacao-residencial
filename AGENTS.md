@@ -10,6 +10,7 @@ O Home Assistant decide o tratamento climático, o ESP8266 transmite o estado co
 
 Este diretório é um **backup de recuperação de uma versão anterior**. Alterações posteriores no ESPHome e no diagnóstico causaram regressões no Supervisor, na transmissão IR e na sincronização de estado.
 
+
 Regras obrigatórias:
 
 - Trate as imagens dentro da pasta Images como contexto extra para cada prompt.
