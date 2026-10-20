@@ -8,10 +8,12 @@ from datetime import date, datetime, time, timedelta
 import logging
 from collections.abc import Callable
 from typing import Any
+from time import monotonic
 from uuid import uuid4
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import (
+    async_call_later,
     async_track_point_in_time,
     async_track_state_change_event,
     async_track_time_interval,
@@ -36,6 +38,7 @@ from .const import (
     UPDATE_INTERVAL,
 )
 from .powers import PowerManagerMixin, find_power_profile
+from .proximity import ProximityTracker
 from .presets import (
     PresetValidationError,
     calculate_preset_state,
@@ -51,6 +54,22 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_POWER_LEVELS = ["Fraco", "Normal", "Forte", "Extremo"]
 DEFAULT_PRESETS = ["Personalizado", "Economia", "Equilíbrio", "Conforto", "Agressivo"]
+
+PROXIMITY_MODE_CONTROLS = {
+    "heat": "input_boolean.elgin_supervisor_aquecimento_habilitado",
+    "cool": "input_boolean.elgin_supervisor_refrigeracao_habilitada",
+    "dry": "input_boolean.elgin_supervisor_desumidificacao_habilitada",
+}
+PROXIMITY_POWER_ENTITIES = {
+    "heat": "sensor.elgin_supervisor_potencia_efetiva_de_aquecimento",
+    "cool": "sensor.elgin_supervisor_potencia_efetiva_de_refrigeracao",
+    "dry": "sensor.elgin_supervisor_potencia_efetiva_de_desumidificacao",
+}
+PROXIMITY_CONTROL_ENTITIES = (
+    "input_boolean.elgin_supervisor_habilitado",
+    *PROXIMITY_MODE_CONTROLS.values(),
+    *PROXIMITY_POWER_ENTITIES.values(),
+)
 
 
 def _parse_date(value: Any, fallback: date | None = None) -> date | None:
@@ -158,6 +177,9 @@ class AgendaManager(PowerManagerMixin):
         self._integrity: dict[str, Any] = {"ok": True, "issues": []}
         self._snapshot: dict[str, Any] = {}
         self._unsub_transition = None
+        self._proximity = ProximityTracker()
+        self._unsub_proximity = None
+        self._proximity_due: float | None = None
 
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
@@ -222,12 +244,17 @@ class AgendaManager(PowerManagerMixin):
             self.hass, self._async_interval, UPDATE_INTERVAL
         )
         self._unsub_states = async_track_state_change_event(
-            self.hass, CATALOG_ENTITIES, self._async_catalog_changed
+            self.hass, CATALOG_ENTITIES + PROXIMITY_CONTROL_ENTITIES, self._async_catalog_changed
         )
 
     async def async_unload(self) -> None:
         """Stop listeners."""
         self._power_unload()
+        self._proximity.reset()
+        if self._unsub_proximity:
+            self._unsub_proximity()
+            self._unsub_proximity = None
+        self._proximity_due = None
         if self._unsub_interval:
             self._unsub_interval()
         if self._unsub_states:
@@ -240,7 +267,86 @@ class AgendaManager(PowerManagerMixin):
         await self.async_evaluate()
 
     async def _async_catalog_changed(self, event) -> None:
+        # Inspect the event value, not just the latest state: a brief departure
+        # and return must still cancel the continuous window.
+        entity_id = event.data.get("entity_id")
+        sample = event.data.get("new_state")
+        if entity_id == "sensor.sensor_temperatura_sensor_dedicado":
+            self._proximity.observe("temperature", sample.state if sample else None)
+        elif entity_id == "sensor.sensor_umidade_sensor_dedicado":
+            self._proximity.observe("humidity", sample.state if sample else None)
+        elif entity_id == "input_boolean.elgin_supervisor_habilitado":
+            if sample is None or sample.state != "on":
+                self._proximity.reset()
+        elif entity_id == "input_select.elgin_supervisor_tratamento_ativo":
+            for mode, name in MODE_NAMES.items():
+                if sample and sample.state == name:
+                    self._proximity.reset(mode)
+        else:
+            for mode, control in PROXIMITY_MODE_CONTROLS.items():
+                if entity_id == control and (sample is None or sample.state != "on"):
+                    self._proximity.reset(mode)
+            for mode, power_entity in PROXIMITY_POWER_ENTITIES.items():
+                if entity_id == power_entity and (sample is None or sample.state == "Desativado"):
+                    self._proximity.reset(mode)
         self.catalog = self._discover_catalog()
+        await self.async_evaluate(force=True)
+
+    def _evaluate_proximity(self, policy: dict[str, Any], now: datetime) -> None:
+        """Expose an optional start request; the existing YAML owns all protections."""
+        def state(entity_id: str) -> str | None:
+            item = self.hass.states.get(entity_id)
+            return item.state if item else None
+
+        limits = self._build_effective_cycle_limits(policy)
+        temperature = state("sensor.sensor_temperatura_sensor_dedicado")
+        humidity = state("sensor.sensor_umidade_sensor_dedicado")
+        active = state("input_select.elgin_supervisor_tratamento_ativo")
+        enabled = (state("input_boolean.elgin_supervisor_habilitado") == "on"
+                   and policy.get("global_action", "normal") in {"normal", "shadow"}
+                   and not policy.get("block_start", False))
+        elapsed_clock = monotonic()
+        for mode, preset in self.preset_state.get("modes", {}).items():
+            # Match the effective-limit templates, including fractional Agenda
+            # offsets: temperature has 0.1 °C precision, humidity has 1%.
+            mode_limits = dict(limits.get(mode, {}))
+            for key in ("start", "stop"):
+                mode_limits[key] = round(
+                    mode_limits[f"preset_{key}"] + mode_limits[f"{key}_offset"],
+                    0 if mode == "dry" else 1,
+                )
+            if mode == "dry":
+                mode_limits["minimum_temperature"] = round(
+                    mode_limits["preset_minimum_temperature"] + mode_limits["minimum_temperature_offset"], 1
+                )
+            allowed = (enabled and preset.get("available", False)
+                       and state(PROXIMITY_MODE_CONTROLS[mode]) == "on"
+                       and (policy.get("modes") or {}).get(mode, True)
+                       and state(PROXIMITY_POWER_ENTITIES[mode]) != "Desativado")
+            preset["proximity_state"] = self._proximity.evaluate(
+                mode, preset, mode_limits,
+                humidity if mode == "dry" else temperature, temperature,
+                allowed, active == MODE_NAMES[mode], now, elapsed_clock,
+            )
+
+    @callback
+    def _schedule_proximity_evaluation(self) -> None:
+        """Wake at the exact deadline even when the sensor value stays unchanged."""
+        due = self._proximity.next_deadline
+        if due == self._proximity_due:
+            return
+        if self._unsub_proximity:
+            self._unsub_proximity()
+            self._unsub_proximity = None
+        self._proximity_due = due
+        if due is not None:
+            self._unsub_proximity = async_call_later(
+                self.hass, max(0, due - monotonic()), self._async_proximity_reached
+            )
+
+    async def _async_proximity_reached(self, _now) -> None:
+        self._unsub_proximity = None
+        self._proximity_due = None
         await self.async_evaluate(force=True)
 
     async def async_save(self) -> None:
@@ -472,6 +578,8 @@ class AgendaManager(PowerManagerMixin):
         duplicate["enabled"] = False
         duplicate["protected"] = False
         duplicate["default"] = False
+        if target_mode != source["mode"]:
+            duplicate["proximity"] = {**duplicate.get("proximity", {}), "enabled": False}
         if target_mode == "dry":
             duplicate["start"] = 63
             duplicate["stop"] = 57
@@ -1041,6 +1149,7 @@ class AgendaManager(PowerManagerMixin):
             self._preset_revision,
         )
         self.preset_state = preset_state
+        self._evaluate_proximity(new_policy, now)
         new_policy["preset_state_revision"] = self._preset_revision
         new_policy["preset_in_use"] = preset_state.get("preset_in_use")
         new_policy["preset_mode_in_use"] = preset_state.get("active_mode")
@@ -1068,7 +1177,12 @@ class AgendaManager(PowerManagerMixin):
 
         # Build the effective signature before timestamps/revisions. Include all
         # stages so a preset-only change cannot be hidden by a stable policy.
-        effective_signature = repr((new_policy, preset_state, power_state))
+        # Countdown labels run in the browser. A tick alone must not generate
+        # another policy event/log; entering/leaving/finishing the window does.
+        signature_presets = deepcopy(preset_state)
+        for mode_state in signature_presets.get("modes", {}).values():
+            (mode_state.get("proximity_state") or {}).pop("remaining_seconds", None)
+        effective_signature = repr((new_policy, signature_presets, power_state))
         changed = force or effective_signature != self._last_signature
         if changed:
             self._revision += 1
@@ -1114,6 +1228,7 @@ class AgendaManager(PowerManagerMixin):
         self.power_state = power_state
         self._snapshot = self._build_public_snapshot(snapshot_meta)
         self._schedule_transition_evaluation()
+        self._schedule_proximity_evaluation()
 
         if runtime_changed:
             await self.async_save()

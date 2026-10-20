@@ -1018,7 +1018,10 @@ template:
       {% set allowed = is_state('input_boolean.elgin_supervisor_aquecimento_habilitado','on')
            and modos_agenda.get('heat', true)
            and states('sensor.elgin_supervisor_potencia_efetiva_de_aquecimento') != 'Desativado' %}
-      {{ allowed and ((active and v < stop) or (not active and v <= start)) }}
+      {% set p = ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get('heat',{}).get('proximity_state') or {}) %}
+      {% set early = p.get('ready', false) and p.get('threshold') == start and p.get('stop') == stop
+           and p.get('lower', start) < v <= p.get('upper', start) %}
+      {{ allowed and ((active and v < stop) or (not active and (v <= start or early))) }}
   - name: Elgin Supervisor - Demanda de refrigeração
     unique_id: elgin_supervisor_v1_demanda_refrigeracao
     default_entity_id: binary_sensor.elgin_supervisor_demanda_refrigeracao
@@ -1034,7 +1037,10 @@ template:
       {% set allowed = is_state('input_boolean.elgin_supervisor_refrigeracao_habilitada','on')
            and modos_agenda.get('cool', true)
            and states('sensor.elgin_supervisor_potencia_efetiva_de_refrigeracao') != 'Desativado' %}
-      {{ allowed and ((active and v > stop) or (not active and v >= start)) }}
+      {% set p = ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get('cool',{}).get('proximity_state') or {}) %}
+      {% set early = p.get('ready', false) and p.get('threshold') == start and p.get('stop') == stop
+           and p.get('lower', start) <= v < p.get('upper', start) %}
+      {{ allowed and ((active and v > stop) or (not active and (v >= start or early))) }}
   - name: Elgin Supervisor - Demanda de desumidificação
     unique_id: elgin_supervisor_v1_demanda_desumidificacao
     default_entity_id: binary_sensor.elgin_supervisor_demanda_desumidificacao
@@ -1052,7 +1058,11 @@ template:
       {% set allowed = is_state('input_boolean.elgin_supervisor_desumidificacao_habilitada','on')
            and modos_agenda.get('dry', true)
            and states('sensor.elgin_supervisor_potencia_efetiva_de_desumidificacao') != 'Desativado' %}
-      {{ allowed and t >= tmin and ((active and h > stop) or (not active and h >= start)) }}
+      {% set p = ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get('dry',{}).get('proximity_state') or {}) %}
+      {% set early = p.get('ready', false) and p.get('threshold') == start and p.get('stop') == stop
+           and p.get('minimum_temperature') == tmin
+           and p.get('lower', start) <= h < p.get('upper', start) %}
+      {{ allowed and t >= tmin and ((active and h > stop) or (not active and (h >= start or early))) }}
   - name: Elgin Supervisor - Preservar estado físico adotado
     unique_id: elgin_supervisor_v4_preservar_estado_fisico_adotado
     default_entity_id: binary_sensor.elgin_supervisor_preservar_estado_fisico_adotado

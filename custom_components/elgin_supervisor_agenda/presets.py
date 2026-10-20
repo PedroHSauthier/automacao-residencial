@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from math import isfinite
 from typing import Any
 from uuid import uuid4
 
@@ -26,6 +27,42 @@ MODE_FROM_TREATMENT = {
 
 class PresetValidationError(ValueError):
     """Raised when a preset violates the mode-specific contract."""
+
+
+PROXIMITY_DEFAULTS = {
+    "enabled": False,
+    "temperature_margin": 0.5,
+    "humidity_margin": 3,
+    "minutes": 10,
+}
+
+
+def normalize_proximity(value: Any, existing: Any = None) -> dict[str, Any]:
+    """Add opt-in defaults and retain omitted fields on partial preset updates."""
+    if not isinstance(value, dict):
+        raise PresetValidationError("A antecipação por proximidade deve ser um objeto.")
+    source = {**PROXIMITY_DEFAULTS, **(existing if isinstance(existing, dict) else {}), **value}
+    enabled = source["enabled"]
+    if isinstance(enabled, str) and enabled.lower() in {"true", "false", "on", "off", "1", "0"}:
+        enabled = enabled.lower() in {"true", "on", "1"}
+    if not isinstance(enabled, bool):
+        raise PresetValidationError("Informe se a antecipação por proximidade está habilitada.")
+    normalized: dict[str, Any] = {"enabled": enabled}
+    for key, minimum, maximum, step, label in (
+        ("temperature_margin", 0, 10, 0.1, "A faixa de temperatura"),
+        ("humidity_margin", 0, 30, 1, "A faixa de umidade"),
+        ("minutes", 1, 1440, 1, "O tempo em minutos"),
+    ):
+        try:
+            number = float(source[key])
+        except (TypeError, ValueError) as err:
+            raise PresetValidationError(f"{label} da antecipação deve ser numérico.") from err
+        if not isfinite(number) or not minimum <= number <= maximum:
+            raise PresetValidationError(f"{label} da antecipação deve ficar entre {minimum} e {maximum}.")
+        if abs(number / step - round(number / step)) > 1e-8:
+            raise PresetValidationError(f"{label} da antecipação deve usar passos de {step}.")
+        normalized[key] = round(number, 1) if key == "temperature_margin" else int(round(number))
+    return normalized
 
 
 def _state_float(hass: HomeAssistant, entity_id: str, default: float) -> float:
@@ -151,6 +188,7 @@ def normalize_preset(preset: dict[str, Any], existing: dict[str, Any] | None = N
         "power_modifier": int(round(float(preset.get("power_modifier", 0)))),
         "protected": bool((existing or {}).get("protected", preset.get("protected", False))),
         "default": bool((existing or {}).get("default", preset.get("default", False))),
+        "proximity": normalize_proximity(preset.get("proximity", {}), (existing or {}).get("proximity")),
     }
     normalized["minimum_temperature"] = (
         round(float(preset.get("minimum_temperature", 19.0)), 1)
@@ -201,6 +239,14 @@ def validate_preset(preset: dict[str, Any], catalog: list[dict[str, Any]]) -> No
 
     if preset.get("default") and not preset.get("enabled"):
         raise PresetValidationError("O preset padrão protegido não pode ser desabilitado.")
+
+    proximity = normalize_proximity(preset.get("proximity", {}))
+    if proximity["enabled"]:
+        margin = proximity["humidity_margin" if preset["mode"] == "dry" else "temperature_margin"]
+        if margin <= 0:
+            raise PresetValidationError("A faixa aplicável ao modo deve ser maior que zero para habilitar a antecipação.")
+        if margin >= round(abs(stop - start), 1):
+            raise PresetValidationError("A faixa de antecipação deve ser menor que a histerese do preset.")
 
 
 def migrate_base_presets(hass: HomeAssistant, presets: list[dict[str, Any]]) -> dict[str, str]:
@@ -431,6 +477,7 @@ def calculate_preset_state(
             "hysteresis": hysteresis,
             "minimum_temperature": effective.get("minimum_temperature"),
             "power_modifier": effective["power_modifier"],
+            "proximity": deepcopy(effective.get("proximity", PROXIMITY_DEFAULTS)),
             "enabled_count": len(enabled),
             "diagnostics": diagnostics,
             "sources": {

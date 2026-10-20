@@ -14,6 +14,7 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 
 from .const import MODE_NAMES, MODES
+from .presets import validate_preset
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -899,6 +900,14 @@ class PowerManagerMixin:
 
     async def async_update_power_settings(self, raw: dict[str, Any]) -> dict[str, Any]:
         settings = normalize_power_settings(raw, self.power_settings or default_power_settings(self.hass))
+        # Validate the mirrored preset before mutating any persistent settings.
+        # Narrowing hysteresis here must not leave an invalid proximity preset
+        # that would be discarded on the next Home Assistant reload.
+        for mode in MODES:
+            base_id = getattr(self, "base_presets", {}).get(mode)
+            preset = next((item for item in getattr(self, "presets", []) if item.get("id") == base_id and item.get("mode") == mode), None)
+            if preset is not None and (preset.get("proximity") or {}).get("enabled"):
+                validate_preset({**preset, **settings["cycle_limits"][mode]}, self.presets)
         self.power_settings = settings
         # Local cycle limits are the canonical editable limits. Mirror them
         # into each mode's current base preset so the existing cycle engine

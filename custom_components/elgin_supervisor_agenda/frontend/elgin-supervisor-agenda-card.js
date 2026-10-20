@@ -6,7 +6,7 @@
   const AGENDA_SWITCH = "switch.elgin_supervisor_agenda_habilitada";
   const REEVALUATE_BUTTON = "button.elgin_supervisor_agenda_reavaliar_agora";
   const CANCEL_BUTTON = "button.elgin_supervisor_agenda_cancelar_excecoes_unicas_ativas";
-  const BUILD_TARGET = "agenda-pipeline-atomic-20260730.3";
+  const BUILD_TARGET = "agenda-proximity-20261003.1";
 
   const PRESET_MANUAL_ADJUST_ENTITIES = {
     heat: "input_number.elgin_supervisor_ajuste_nivel_preset_aquecimento",
@@ -837,6 +837,38 @@
     modeState(mode = this.activeMode) { return this.data?.power_state?.modes?.[mode] || {}; }
     presetModeState(mode = this.activeMode) { return this.data?.preset_state?.modes?.[mode] || {}; }
 
+    proximityConfig(item) {
+      const config = item.proximity || {};
+      if (!config.enabled) return "Antecipação desabilitada";
+      const margin = item.mode === "dry" ? `${config.humidity_margin}% de umidade` : `${config.temperature_margin} °C de temperatura`;
+      return `Antecipação: ${margin} por ${config.minutes} min`;
+    }
+
+    proximityStatus(mode, state = this.presetModeState(mode)) {
+      const runtime = state.proximity_state || {};
+      const config = state.proximity || {};
+      if (!config.enabled) return '<div class="trace-line"><span>Antecipação por proximidade</span><b>Desabilitada neste preset</b></div>';
+      const labels = { waiting: "Aguardando faixa", outside: "Fora da faixa", counting: "Contando permanência", ready: "Tempo cumprido", disabled: "Desabilitada", normal: "Limite normal atingido", active: "Ciclo ativo", blocked: "Bloqueada", unavailable: "Sensor indisponível", invalid: "Leitura ou configuração inválida" };
+      const status = runtime.ready ? "Tempo cumprido; sujeito às proteções" : labels[runtime.status] || "Aguardando avaliação";
+      const remaining = runtime.deadline && !runtime.ready ? `<span data-proximity-deadline="${esc(runtime.deadline)}">${esc(fmtDuration(runtime.deadline))}</span>` : "";
+      const unit = mode === "dry" ? "%" : "°C";
+      const range = runtime.lower != null && runtime.upper != null
+        ? `${runtime.lower} ${mode === "heat" ? "<" : "≤"} ${mode === "dry" ? "umidade" : "temperatura"} ${mode === "heat" ? "≤" : "<"} ${runtime.upper} ${unit}` : "";
+      return `<div class="trace-line proximity-state"><span>Antecipação por proximidade · ${esc(config.minutes)} min</span><b>${esc(status)}${remaining ? ` · faltam ${remaining}` : ""}</b>${range ? `<small>${esc(range)}</small>` : ""}<small>${esc(runtime.reason || this.proximityConfig({ mode, proximity: config }))}</small></div>`;
+    }
+
+    updateProximityCountdowns() {
+      this.querySelectorAll("[data-proximity-deadline]").forEach((node) => {
+        node.textContent = fmtDuration(node.dataset.proximityDeadline);
+      });
+    }
+
+    disconnectedCallback() {
+      super.disconnectedCallback();
+      clearInterval(this._proximityCountdown);
+      this._proximityCountdown = null;
+    }
+
     flash(message, error = false) {
       this._status = message;
       this._statusError = error;
@@ -871,6 +903,7 @@
         return `<article class="mode-overview ${active === mode ? "in-use" : ""}">
           <header><ha-icon icon="${icon}"></ha-icon><div><strong>${label}</strong><small>${active === mode ? "Controlando agora" : candidate.eligible ? "Elegível" : "Em espera"}</small></div><span class="badge">${candidate.score ?? "—"} pts</span></header>
           <div class="kv"><span>Preset efetivo</span><b>${esc(ps.effective_name || "—")}</b></div>
+          ${this.proximityStatus(mode, ps)}
           <div class="kv"><span>Potência base</span><b>${esc(ws.calculation_base_name || ws.base_name || "—")} · N${ws.calculation_base_level ?? "—"}</b></div>
           <div class="formula"><span>Base ${ws.calculation_base_level ?? 0}</span><span>Preset ${signed(ws.modifiers?.preset)}</span><span>Agenda ${signed(ws.modifiers?.agenda)}</span><span>Clima ${signed(ws.modifiers?.regional)}</span><span>Regras ${signed(ws.modifiers?.rules)}</span></div>
           <div class="result"><div><small>Nível calculado</small><strong>${ws.calculated_level ?? "—"}</strong></div><div><small>Perfil aplicado</small><strong>${esc(ws.effective_name || "—")}</strong></div><div><small>Comando</small><strong>${ws.target_temperature ?? "—"} °C · ${esc(ws.fan || "—")}</strong></div></div>
@@ -898,13 +931,14 @@
       return `<section class="panel">${this.modeTabs()}<div class="section-title"><div><h3>Presets de condição — ${this.modeMeta(mode).label}</h3><p>Definem quando o ciclo inicia e termina. Somente o preset efetivo do modo ativo participa da potência.</p></div><button id="new-preset"><ha-icon icon="mdi:plus"></ha-icon>Novo preset</button></div>
         <div class="config-row"><label>Preset base<select id="preset-base">${items.filter((p) => p.enabled).map((p) => `<option value="${esc(p.id)}" ${p.id === baseId ? "selected" : ""}>${esc(p.name)} · nível ${p.level}</option>`).join("")}</select></label><div class="mini-metric"><small>Nível calculado</small><strong>${state.calculated_level ?? "—"}</strong></div><div class="mini-metric"><small>Preset efetivo</small><strong>${esc(state.effective_name || "—")}</strong></div><div class="mini-metric"><small>Modificador de potência</small><strong>${signed(state.power_modifier)}</strong></div></div>
         <div class="calculation-card"><div><small>Cálculo completo</small><strong>${esc(formula)}</strong></div><div class="chip-row"><span class="chip ${manual ? "warn" : ""}">Manual ${signed(manual)}</span><span class="chip ${agenda ? "active" : ""}">Agenda ${signed(agenda)}</span><span class="chip ${regional ? "warn" : ""}">Regional ${signed(regional)}</span>${state.agenda_base_override ? '<span class="chip active">Base temporária da Agenda</span>' : ""}</div><div class="manual-adjust"><span>Ajuste manual persistente</span><button class="secondary icon-button" id="manual-minus" title="Reduzir ajuste manual"><ha-icon icon="mdi:minus"></ha-icon></button><strong>${signed(manual)}</strong><button class="secondary icon-button" id="manual-plus" title="Aumentar ajuste manual"><ha-icon icon="mdi:plus"></ha-icon></button><button class="secondary" id="manual-reset" ${manual === 0 ? "disabled" : ""}><ha-icon icon="mdi:restore"></ha-icon>Zerar</button></div>${agendaSources.length ? `<div class="source-list"><strong>Origem da Agenda</strong>${agendaSources.map((source) => `<span>${esc(source.rule)} · P${source.priority} · ${signed(source.value)}</span>`).join("")}${nextTransition ? `<span>Válido até a próxima transição: ${esc(fmtDateTime(nextTransition))} (${esc(fmtDuration(nextTransition))})</span>` : ""}</div>` : ""}${toArray(state.diagnostics).length ? `<div class="diag-note">${toArray(state.diagnostics).map(esc).join(" · ")}</div>` : ""}</div>
+        ${this.proximityStatus(mode, state)}
         <div class="catalog-grid">${items.map((item) => this.presetCard(item, state, baseId)).join("") || '<div class="empty">Nenhum preset neste modo.</div>'}</div>
       </section>`;
     }
 
     presetCard(item, state, baseId) {
       const isEffective = state.effective_id === item.id;
-      return `<article class="catalog-card ${isEffective ? "effective" : ""}"><div class="card-head"><div class="chip-row"><span class="chip ${item.enabled ? "active" : "warn"}">${item.enabled ? "Habilitado" : "Desabilitado"}</span><span class="chip">Nível ${item.level}</span>${item.id === baseId ? '<span class="chip active">Base</span>' : ""}${isEffective ? '<span class="chip active">Efetivo</span>' : ""}</div><div class="card-actions"><button class="secondary icon-button edit-preset" data-id="${esc(item.id)}"><ha-icon icon="mdi:pencil"></ha-icon></button><button class="secondary icon-button duplicate-preset" data-id="${esc(item.id)}"><ha-icon icon="mdi:content-copy"></ha-icon></button><button class="danger icon-button delete-preset" data-id="${esc(item.id)}" ${item.protected ? "disabled" : ""}><ha-icon icon="mdi:delete"></ha-icon></button></div></div><h4>${esc(item.name)}</h4><div class="profile-line">${item.mode === "dry" ? `${item.start}% → ${item.stop}% · mínima ${item.minimum_temperature} °C` : `${item.start} °C → ${item.stop} °C`} · potência ${signed(item.power_modifier)}</div><p>${esc(item.description || "Sem descrição")}</p></article>`;
+      return `<article class="catalog-card ${isEffective ? "effective" : ""}"><div class="card-head"><div class="chip-row"><span class="chip ${item.enabled ? "active" : "warn"}">${item.enabled ? "Habilitado" : "Desabilitado"}</span><span class="chip">Nível ${item.level}</span>${item.id === baseId ? '<span class="chip active">Base</span>' : ""}${isEffective ? '<span class="chip active">Efetivo</span>' : ""}</div><div class="card-actions"><button class="secondary icon-button edit-preset" data-id="${esc(item.id)}"><ha-icon icon="mdi:pencil"></ha-icon></button><button class="secondary icon-button duplicate-preset" data-id="${esc(item.id)}"><ha-icon icon="mdi:content-copy"></ha-icon></button><button class="danger icon-button delete-preset" data-id="${esc(item.id)}" ${item.protected ? "disabled" : ""}><ha-icon icon="mdi:delete"></ha-icon></button></div></div><h4>${esc(item.name)}</h4><div class="profile-line">${item.mode === "dry" ? `${item.start}% → ${item.stop}% · mínima ${item.minimum_temperature} °C` : `${item.start} °C → ${item.stop} °C`} · potência ${signed(item.power_modifier)}</div><p>${esc(this.proximityConfig(item))}</p><p>${esc(item.description || "Sem descrição")}</p></article>`;
     }
 
     profilesPanel() {
@@ -960,13 +994,14 @@
       const readable = MODES.map(([mode,label,icon]) => {
         const preset = presetModes[mode] || {};
         const power = powerModes[mode] || {};
-        return `<article class="diagnostic-mode"><h4><ha-icon icon="${icon}"></ha-icon>${label}</h4><div class="trace-line"><span>Preset</span><b>Base ${preset.calculation_base_name || "—"} N${preset.calculation_base_level ?? "—"} + Manual ${signed(preset.manual_level_delta)} + Agenda ${signed(preset.agenda_level_delta)} + Regional ${signed(preset.regional_level_delta)} = ${preset.effective_name || "—"} N${preset.effective_level ?? "—"}</b></div><div class="trace-line"><span>Potência</span><b>Base ${power.calculation_base_name || "—"} N${power.calculation_base_level ?? "—"} + Preset ${signed(power.modifiers?.preset)} + Agenda ${signed(power.modifiers?.agenda)} + Clima ${signed(power.modifiers?.regional)} + Regras ${signed(power.modifiers?.rules)} = ${power.effective_name || "—"} N${power.applied_level ?? "—"}</b></div><div class="trace-line"><span>Comando calculado</span><b>${power.target_temperature ?? "—"} °C · fan ${power.fan || "—"}</b></div></article>`;
+        return `<article class="diagnostic-mode"><h4><ha-icon icon="${icon}"></ha-icon>${label}</h4><div class="trace-line"><span>Preset</span><b>Base ${preset.calculation_base_name || "—"} N${preset.calculation_base_level ?? "—"} + Manual ${signed(preset.manual_level_delta)} + Agenda ${signed(preset.agenda_level_delta)} + Regional ${signed(preset.regional_level_delta)} = ${preset.effective_name || "—"} N${preset.effective_level ?? "—"}</b></div>${this.proximityStatus(mode, preset)}<div class="trace-line"><span>Potência</span><b>Base ${power.calculation_base_name || "—"} N${power.calculation_base_level ?? "—"} + Preset ${signed(power.modifiers?.preset)} + Agenda ${signed(power.modifiers?.agenda)} + Clima ${signed(power.modifiers?.regional)} + Regras ${signed(power.modifiers?.rules)} = ${power.effective_name || "—"} N${power.applied_level ?? "—"}</b></div><div class="trace-line"><span>Comando calculado</span><b>${power.target_temperature ?? "—"} °C · fan ${power.fan || "—"}</b></div></article>`;
       }).join("");
       const state = { snapshot, integrity, mode_decision: this.data?.power_state?.mode_decision, cycle_limits: this.data?.power_state?.cycle_limits, priorities: this.data?.power_state?.priorities, continuity_bonus: this.data?.power_state?.continuity_bonus, powers: powerModes, active_rules: this.data?.power_state?.active_rules, presets: presetModes, policy: this.data?.policy };
       return `<section class="panel"><div class="section-title"><div><h3>Diagnóstico ponta a ponta</h3><p>Leitura humana do mesmo snapshot atômico usado pela Agenda, presets, potência e Supervisor.</p></div><div class="chip-row"><span class="chip ${integrity.ok ? "active" : "error"}">${integrity.ok ? "Cadeia consistente" : `${toArray(integrity.issues).length} inconsistência(s)`}</span><span class="chip">Revisão ${snapshot.snapshot_revision ?? "—"}</span></div></div>${integrity.ok ? "" : `<div class="integrity-errors">${toArray(integrity.issues).map((issue) => `<div><b>${esc(issue.stage)} · ${esc(issue.mode || "global")}</b><span>${esc(issue.message)}</span></div>`).join("")}</div>`}<div class="diagnostic-grid">${readable}</div><details class="raw-diagnostic"><summary>JSON técnico completo</summary><div class="section-title sub"><div><p>Use este conteúdo para auditoria e suporte.</p></div><button class="secondary" id="copy-diagnostic"><ha-icon icon="mdi:content-copy"></ha-icon>Copiar</button></div><pre id="diagnostic-json">${esc(JSON.stringify(state, null, 2))}</pre></details></section>`;
     }
 
     render() {
+      if (this.querySelector("#unified-editor[open]")) return;
       const body = this.activeTab === "overview" ? this.overview() : this.activeTab === "presets" ? this.presetPanel() : this.activeTab === "profiles" ? this.profilesPanel() : this.activeTab === "rules" ? this.rulesPanel() : this.activeTab === "settings" ? this.settingsPanel() : this.diagnosticsPanel();
       this.innerHTML = `<style>${sharedStyles}
         ha-card{background:var(--ha-card-background,var(--card-background-color))}.unified{padding:clamp(12px,1.8vw,22px)}
@@ -982,6 +1017,9 @@
         @container(max-width:760px){.mode-grid,.catalog-grid,.rule-grid,.settings-grid,.decision-strip,.config-row,.priority-grid,.diagnostic-grid{grid-template-columns:1fr}.result{grid-template-columns:1fr}.section-title{display:grid}.nav-tab span{display:none}.rule-details{grid-template-columns:1fr}.priority-card{grid-template-columns:auto minmax(0,1fr) 84px}.dialog-grid{grid-template-columns:1fr}.dialog-grid .full{grid-column:auto}}
       </style><ha-card><div class="unified"><div class="title-row"><div><div class="eyebrow">Configuração consolidada</div><h2>Presets e Potência</h2><p>Condições do ciclo, prioridade do modo, perfis dinâmicos, regras de intensidade e diagnóstico.</p></div><span class="chip active"><ha-icon icon="mdi:database-check-outline"></ha-icon>Persistência local</span></div>${this.data?.error ? `<ha-alert alert-type="error">${esc(this.data.error)}</ha-alert>` : ""}${this._status ? `<div class="status-line ${this._statusError ? "error" : ""}">${esc(this._status)}</div>` : ""}${this.tabs()}${body}<dialog id="unified-editor"><div class="dialog-body" id="unified-editor-body"></div></dialog></div></ha-card>`;
       this.bind();
+      clearInterval(this._proximityCountdown);
+      this._proximityCountdown = this.querySelector("[data-proximity-deadline]")
+        ? setInterval(() => this.updateProximityCountdowns(), 1000) : null;
     }
 
     bind() {
@@ -1039,9 +1077,64 @@
       if (!item) return;
       const dialog = this.querySelector("#unified-editor"), body = this.querySelector("#unified-editor-body"); if (!dialog || !body) return;
       const existing = Boolean(item.id), mode = item.mode || this.activeMode;
-      body.innerHTML = this.editorShell(existing ? `Editar ${item.name}` : "Novo preset de condição", existing ? `ID imutável: ${item.id}` : "O modo será imutável depois da criação.", `<div class="dialog-grid"><label>Modo<select id="e-mode" ${existing ? "disabled" : ""}>${MODES.map(([m,l]) => `<option value="${m}" ${m === mode ? "selected" : ""}>${l}</option>`).join("")}</select></label><label>Nome<input id="e-name" value="${esc(item.name || "")}"></label><label>Nível<input id="e-level" type="number" step="1" value="${item.level ?? 0}"></label><label>Modificador de potência<input id="e-modifier" type="number" step="1" value="${item.power_modifier ?? 0}"></label><label>Condição de início<input id="e-start" type="number" step="${mode === "dry" ? 1 : .1}" value="${item.start ?? ""}"></label><label>Condição de encerramento<input id="e-stop" type="number" step="${mode === "dry" ? 1 : .1}" value="${item.stop ?? ""}"></label><label class="dry-field">Temperatura mínima do Dry<input id="e-min" type="number" step="0.1" value="${item.minimum_temperature ?? 20}"></label><label>Estado<select id="e-enabled"><option value="true" ${item.enabled !== false ? "selected" : ""}>Habilitado</option><option value="false" ${item.enabled === false ? "selected" : ""}>Desabilitado</option></select></label><label class="full">Descrição<textarea id="e-description">${esc(item.description || "")}</textarea></label></div>`, "save-editor");
-      const sync = () => { body.querySelector(".dry-field").hidden = body.querySelector("#e-mode").value !== "dry"; }; sync(); body.querySelector("#e-mode")?.addEventListener("change", sync);
-      this.bindDialogClose(dialog); body.querySelector("#save-editor").addEventListener("click", async () => { const m = body.querySelector("#e-mode").value; const preset = { ...(existing ? item : {}), mode:m, name:body.querySelector("#e-name").value.trim(), level:Number(body.querySelector("#e-level").value), power_modifier:Number(body.querySelector("#e-modifier").value), start:Number(body.querySelector("#e-start").value), stop:Number(body.querySelector("#e-stop").value), minimum_temperature:m === "dry" ? Number(body.querySelector("#e-min").value) : null, enabled:body.querySelector("#e-enabled").value === "true", description:body.querySelector("#e-description").value.trim() }; try { await this.ws("save_preset", { preset }); closeDialog(dialog); this.activeMode=m; this._status="Preset salvo."; await this.load(); } catch(error){ alert(error.message || error); } }); openDialog(dialog);
+      const proximity = { enabled: false, temperature_margin: 0.5, humidity_margin: 3, minutes: 10, ...item.proximity };
+      body.innerHTML = this.editorShell(existing ? `Editar ${item.name}` : "Novo preset de condição", existing ? `ID imutável: ${item.id}` : "O modo será imutável depois da criação.", `<div class="dialog-grid">
+        <label>Modo<select id="e-mode" ${existing ? "disabled" : ""}>${MODES.map(([m,l]) => `<option value="${m}" ${m === mode ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label>Nome<input id="e-name" required value="${esc(item.name || "")}"></label>
+        <label>Nível<input id="e-level" type="number" required min="-100" max="100" step="1" value="${item.level ?? 0}"></label>
+        <label>Modificador de potência<input id="e-modifier" type="number" required min="-20" max="20" step="1" value="${item.power_modifier ?? 0}"></label>
+        <label><span id="e-start-label">Condição de início</span><input id="e-start" type="number" required step="${mode === "dry" ? 1 : .1}" value="${item.start ?? ""}"></label>
+        <label><span id="e-stop-label">Condição de encerramento</span><input id="e-stop" type="number" required step="${mode === "dry" ? 1 : .1}" value="${item.stop ?? ""}"></label>
+        <label class="dry-field">Temperatura mínima do Dry (°C)<input id="e-min" type="number" required min="5" max="30" step="0.1" value="${item.minimum_temperature ?? 20}"></label>
+        <label>Estado<select id="e-enabled"><option value="true" ${item.enabled !== false ? "selected" : ""}>Habilitado</option><option value="false" ${item.enabled === false ? "selected" : ""}>Desabilitado</option></select></label>
+        <div class="full section-title sub"><div><h3>Antecipação por proximidade</h3><p>Heat/Cool usam temperatura; Dry usa umidade e mantém sua temperatura mínima. A contagem zera ao sair da faixa. O limite normal inicia o ciclo sem esperar o tempo.</p></div></div>
+        <label>Antecipação neste preset<select id="e-proximity-enabled"><option value="false" ${!proximity.enabled ? "selected" : ""}>Desabilitada</option><option value="true" ${proximity.enabled ? "selected" : ""}>Habilitada</option></select></label>
+        <label>Tempo contínuo (min)<input id="e-proximity-minutes" type="number" required min="1" max="1440" step="1" value="${esc(proximity.minutes)}"></label>
+        <label>Faixa de temperatura (°C, Heat/Cool)<input id="e-proximity-temperature" type="number" required min="0" max="10" step="0.1" value="${esc(proximity.temperature_margin)}"></label>
+        <label>Faixa de umidade (%, Dry)<input id="e-proximity-humidity" type="number" required min="0" max="30" step="1" value="${esc(proximity.humidity_margin)}"></label>
+        <p class="full muted">A faixa usada pelo modo deve ser maior que zero e menor que a histerese. A potência continua definida separadamente.</p>
+        <label class="full">Descrição<textarea id="e-description">${esc(item.description || "")}</textarea></label></div>`, "save-editor");
+      const sync = () => {
+        const m = body.querySelector("#e-mode").value, dry = m === "dry";
+        const enabled = body.querySelector("#e-proximity-enabled").value === "true";
+        body.querySelector(".dry-field").hidden = !dry;
+        body.querySelector("#e-min").disabled = !dry;
+        body.querySelector("#e-start").step = body.querySelector("#e-stop").step = dry ? "1" : "0.1";
+        const [startMin, startMax, stopMin, stopMax] = m === "heat" ? [5, 32, 5, 35] : dry ? [30, 100, 20, 95] : [10, 45, 10, 40];
+        body.querySelector("#e-start").min = String(startMin);
+        body.querySelector("#e-start").max = String(startMax);
+        body.querySelector("#e-stop").min = String(stopMin);
+        body.querySelector("#e-stop").max = String(stopMax);
+        body.querySelector("#e-start-label").textContent = `Condição de início (${dry ? "%" : "°C"})`;
+        body.querySelector("#e-stop-label").textContent = `Condição de encerramento (${dry ? "%" : "°C"})`;
+        body.querySelector("#e-proximity-temperature").disabled = !enabled || dry;
+        body.querySelector("#e-proximity-humidity").disabled = !enabled || !dry;
+        body.querySelector("#e-proximity-minutes").disabled = !enabled;
+      };
+      sync();
+      body.querySelector("#e-mode").addEventListener("change", sync);
+      body.querySelector("#e-proximity-enabled").addEventListener("change", sync);
+      this.bindDialogClose(dialog);
+      body.querySelector("#save-editor").addEventListener("click", async () => {
+        for (const input of body.querySelectorAll("input")) { if (!input.reportValidity()) return; }
+        const m = body.querySelector("#e-mode").value;
+        const preset = {
+          ...(existing ? item : {}), mode: m, name: body.querySelector("#e-name").value.trim(),
+          level: Number(body.querySelector("#e-level").value), power_modifier: Number(body.querySelector("#e-modifier").value),
+          start: Number(body.querySelector("#e-start").value), stop: Number(body.querySelector("#e-stop").value),
+          minimum_temperature: m === "dry" ? Number(body.querySelector("#e-min").value) : null,
+          enabled: body.querySelector("#e-enabled").value === "true", description: body.querySelector("#e-description").value.trim(),
+          proximity: {
+            enabled: body.querySelector("#e-proximity-enabled").value === "true",
+            temperature_margin: Number(body.querySelector("#e-proximity-temperature").value),
+            humidity_margin: Number(body.querySelector("#e-proximity-humidity").value),
+            minutes: Number(body.querySelector("#e-proximity-minutes").value),
+          },
+        };
+        try { await this.ws("save_preset", { preset }); closeDialog(dialog); this.activeMode = m; this._status = "Preset salvo."; await this.load(); }
+        catch (error) { alert(error.message || error); }
+      });
+      openDialog(dialog);
     }
 
     openProfileEditor(item) {
@@ -1076,7 +1169,13 @@
       output.innerHTML=`<b>Prévia</b><div>Entrada: diferença ${esc(entryOp)} ${entry} · Saída: diferença ${esc(exitOp)} ${exit}</div>${rows.join("")||"<div>Defina ao menos um ajuste diferente de zero.</div>"}`;
     }
 
-    bindDialogClose(dialog) { this.querySelectorAll(".close-editor").forEach((button) => button.addEventListener("click", () => closeDialog(dialog))); }
+    bindDialogClose(dialog) {
+      dialog.onclose = () => this.render();
+      this.querySelectorAll(".close-editor").forEach((button) => button.addEventListener("click", () => {
+        closeDialog(dialog);
+        if (typeof dialog.close !== "function") this.render();
+      }));
+    }
   }
 
 

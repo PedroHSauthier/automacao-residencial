@@ -54,7 +54,12 @@ save_preset:
   fields:
     preset:
       name: Preset
-      description: Objeto completo do preset. O identificador e o modo são imutáveis após a criação.
+      description: >-
+        Objeto completo do preset. O identificador e o modo são imutáveis após a criação.
+        proximity aceita enabled (padrão false), temperature_margin (0 a 10 °C em passos
+        de 0,1), humidity_margin (0 a 30% em passos de 1) e minutes (1 a 1440).
+        Heat/Cool usam a faixa de temperatura; Dry usa a faixa de umidade e preserva
+        sua temperatura mínima. Campos de proximity omitidos preservam o valor salvo.
       required: true
       selector:
         object:

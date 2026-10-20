@@ -24,7 +24,8 @@ class StaticContractTests(unittest.TestCase):
         }
         for relative, digest in expected.items():
             with self.subTest(path=relative):
-                content = (REPOSITORY / relative).read_bytes()
+                # Git checkouts may convert line endings on Windows.
+                content = (REPOSITORY / relative).read_bytes().replace(b"\r\n", b"\n")
                 self.assertEqual(hashlib.sha256(content).hexdigest(), digest)
 
     def test_supervisor_still_has_one_full_state_action(self) -> None:
@@ -33,7 +34,7 @@ class StaticContractTests(unittest.TestCase):
             package.count("action: esphome.esp8266_elgin_send_state"), 1
         )
 
-    def test_supervisor_diff_is_diagnostic_only_after_structural_normalization(self) -> None:
+    def test_supervisor_diff_is_diagnostics_and_reviewed_proximity_only(self) -> None:
         class HALoader(yaml.SafeLoader):
             pass
 
@@ -49,6 +50,37 @@ class StaticContractTests(unittest.TestCase):
             (REPOSITORY / "packages/elgin_supervisor_climatico.yaml").read_text(),
             Loader=HALoader,
         )
+        # Keep the original recovery hash. Allow only the three reviewed,
+        # rendered-and-tested proximity clauses; do not rebaseline the package.
+        def remove_reviewed_proximity(value):
+            if isinstance(value, list):
+                for child in value:
+                    remove_reviewed_proximity(child)
+            elif isinstance(value, dict):
+                entity_id = value.get("default_entity_id", "")
+                for mode, suffix, metric, comparison, band in (
+                    ("heat", "aquecimento", "v", "<=", "< v <="),
+                    ("cool", "refrigeracao", "v", ">=", "<= v <"),
+                    ("dry", "desumidificacao", "h", ">=", "<= h <"),
+                ):
+                    if entity_id != f"binary_sensor.elgin_supervisor_demanda_{suffix}":
+                        continue
+                    clause = (
+                        "{% set p = ((state_attr('sensor.elgin_supervisor_presets_de_condicao','modes') or {}).get('"
+                        + mode + "',{}).get('proximity_state') or {}) %}\n"
+                        "{% set early = p.get('ready', false) and p.get('threshold') == start and p.get('stop') == stop\n"
+                        + ("     and p.get('minimum_temperature') == tmin\n" if mode == "dry" else "")
+                        + f"     and p.get('lower', start) {band} p.get('upper', start) %}}\n"
+                    )
+                    self.assertEqual(1, value["state"].count(clause))
+                    expanded = f"(not active and ({metric} {comparison} start or early))"
+                    original = f"(not active and {metric} {comparison} start)"
+                    self.assertEqual(1, value["state"].count(expanded))
+                    value["state"] = value["state"].replace(clause, "").replace(expanded, original)
+                for child in value.values():
+                    remove_reviewed_proximity(child)
+
+        remove_reviewed_proximity(current)
         def without_diagnostics(value):
             if isinstance(value, list):
                 return [

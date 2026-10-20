@@ -172,3 +172,5 @@ Após a baseline estar validada:
 5. Criar um card principal coeso, responsivo e visualmente padronizado para o Supervisor.
 6. Auditar todas as interconexões entre Agenda, presets, potência, clima regional, Supervisor, ESPHome, Climate e LocalTuya.
 7. Executar testes de regressão completos antes de remover qualquer caminho legado.
+
+
